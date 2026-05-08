@@ -1,0 +1,15 @@
+.claude
+docs
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+app/uploads/
+app/outputs/
+*.pt
+.env
+dataset
+yolo26n.pt
+yolo26s.pt
+dataset/

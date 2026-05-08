@@ -1,0 +1,24 @@
+services:
+  chicken-counter:
+    image: chicken-counter:latest
+    build: .
+    ports:
+      - "5581:5581"
+    volumes:
+      - ./app/uploads:/app/app/uploads
+      - ./app/outputs:/app/app/outputs
+    environment:
+      - RTSP_URL=${RTSP_URL:-}
+      - MODEL_PATH=best.pt
+      - ROI_POSITION=${ROI_POSITION:-0.5}
+      - CONFIDENCE=${CONFIDENCE:-0.25}
+      - MAX_DISTANCE=${MAX_DISTANCE:-40}
+      - MAX_DISAPPEARED=${MAX_DISAPPEARED:-50}
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped

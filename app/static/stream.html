@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <title>Chicken Counter - Live Stream</title>
+    <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <span class="logo">ChickenCounter</span>
+        <a href="/">Image</a>
+        <a href="/video.html">Video</a>
+        <a href="/stream.html" class="active">Stream</a>
+    </nav>
+
+    <div class="container">
+        <h1 class="page-title">Live Stream</h1>
+        <p class="page-subtitle">Connect to RTSP camera and count chickens crossing the vertical ROI line in real time</p>
+
+        <div class="card">
+            <div style="display:flex; gap:12px; margin-bottom:20px;">
+                <input class="input" id="rtspUrl" type="text" placeholder="rtsp://user:pass@camera-ip:554/stream">
+                <button class="btn btn-success" id="btnConnect">Connect</button>
+                <button class="btn btn-danger" id="btnDisconnect" disabled>Disconnect</button>
+            </div>
+
+            <div class="controls">
+                <button class="btn btn-primary" id="btnCountStart" disabled>Start Counting</button>
+                <button class="btn btn-outline" id="btnCountStop" disabled>Stop Counting</button>
+                <span style="flex:1;"></span>
+                <span class="status-dot inactive" id="statusDot"></span>
+                <span style="font-size:13px; color:var(--text-dim);" id="statusLabel">Disconnected</span>
+            </div>
+        </div>
+
+        <div class="feed-container">
+            <img id="feedImg" style="display:none;" alt="Live Feed">
+            <span class="feed-placeholder" id="feedPlaceholder">Connect to stream to begin</span>
+        </div>
+
+        <div class="stats-panel">
+            <div class="stat">
+                <div class="value white" id="totalCount">0</div>
+                <div class="label">Total Counted</div>
+            </div>
+            <div class="stat">
+                <div class="value orange" id="emptyCount">0</div>
+                <div class="label">Empty Shackles</div>
+            </div>
+            <div class="stat">
+                <div class="value amber" id="singleCount">0</div>
+                <div class="label">Single Legged</div>
+            </div>
+            <div class="stat">
+                <div class="value green" id="slaughteredCount">0</div>
+                <div class="label">Slaughtered</div>
+            </div>
+            <div class="stat">
+                <div class="value amber" id="fpsVal">0</div>
+                <div class="label">FPS</div>
+            </div>
+        </div>
+
+        <div class="class-legend" style="margin-top:4px;">
+            <div class="legend-item"><div class="legend-dot" style="background:#ff9100;"></div> Empty Shackles</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#ffc400;"></div> Single Legged</div>
+            <div class="legend-item"><div class="legend-dot" style="background:#00e676;"></div> Slaughtered Chicken</div>
+        </div>
+
+        <div class="card" style="margin-top:24px;">
+            <h3 style="margin-bottom:16px; font-size:16px;">Settings</h3>
+            <div class="setting-row">
+                <label>ROI Position</label>
+                <input type="range" id="roiSlider" min="0.1" max="0.9" step="0.05" value="0.5">
+                <span class="range-value" id="roiValue">0.50</span>
+            </div>
+            <div class="setting-row">
+                <label>Confidence</label>
+                <input type="range" id="confSlider" min="0.1" max="0.9" step="0.05" value="0.25">
+                <span class="range-value" id="confValue">0.25</span>
+            </div>
+        </div>
+    </div>
+
+    <script src="/js/stream.js"></script>
+</body>
+</html>
