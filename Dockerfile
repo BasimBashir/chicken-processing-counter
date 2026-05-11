@@ -18,6 +18,9 @@ COPY .env .
 
 RUN mkdir -p app/uploads app/outputs
 
+COPY docker-entrypoint.sh /docker-entrypoint.sh
+RUN chmod +x /docker-entrypoint.sh
+
 EXPOSE 5581
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "5581"]
+CMD ["/docker-entrypoint.sh"]
