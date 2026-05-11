@@ -39,9 +39,35 @@ Each class has its own **independent tracker and counter** — counts never blee
 
 ## Quick Start
 
-### Option A: Docker (recommended)
+### Option A: Pull pre-built image from Docker Hub (fastest)
 
-The same image runs on both CPU and GPU hosts — it auto-selects the device at startup and logs which one it chose.
+No clone needed — pull the image and run it. Works on both CPU and GPU hosts; the container auto-selects the device at startup.
+
+**CPU:**
+
+```bash
+docker pull basim123/chicken-counter:latest
+docker run -d --name chicken-counter -p 5581:5581 \
+  -v $(pwd)/uploads:/app/app/uploads \
+  -v $(pwd)/outputs:/app/app/outputs \
+  basim123/chicken-counter:latest
+```
+
+**GPU (NVIDIA + [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) required):**
+
+```bash
+docker pull basim123/chicken-counter:latest
+docker run -d --name chicken-counter --gpus all -p 5581:5581 \
+  -v $(pwd)/uploads:/app/app/uploads \
+  -v $(pwd)/outputs:/app/app/outputs \
+  basim123/chicken-counter:latest
+```
+
+Open **http://localhost:5581**. See [INTEGRATION.md](INTEGRATION.md) for the full API reference and client examples if you're embedding this in another application.
+
+### Option B: Build from source with Docker Compose
+
+Use this if you cloned the repo (e.g. to tweak the Dockerfile or ship a custom model). The same image runs on both CPU and GPU hosts.
 
 **CPU (default):**
 
@@ -49,7 +75,7 @@ The same image runs on both CPU and GPU hosts — it auto-selects the device at 
 docker compose up --build
 ```
 
-**GPU (NVIDIA + [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) required):**
+**GPU (NVIDIA + nvidia-container-toolkit required):**
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
@@ -57,7 +83,7 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
 
 Open **http://localhost:5581**. The container logs a `[startup] CUDA available: ...` line so you can confirm the selected device. `GET /health` also reports it.
 
-### Option B: Local Setup
+### Option C: Local Setup
 
 ```bash
 python -m venv .venv
@@ -443,7 +469,23 @@ Slaughtered_Chicken_Counting/
 
 The image is a **single artifact** that works on both CPU and GPU hosts. PyTorch's CUDA-12.6 wheel is bundled and falls back to CPU automatically when no GPU is visible; the startup script logs which device was selected.
 
-### CPU (default)
+Published to Docker Hub as **[`basim123/chicken-counter`](https://hub.docker.com/r/basim123/chicken-counter)** with tags `latest` and `1.0.0`. Full pull/run/API reference for downstream applications: [INTEGRATION.md](INTEGRATION.md).
+
+### Pull from Docker Hub (no clone required)
+
+```bash
+# CPU
+docker run -d --name chicken-counter -p 5581:5581 \
+  basim123/chicken-counter:latest
+
+# GPU (NVIDIA + nvidia-container-toolkit)
+docker run -d --name chicken-counter --gpus all -p 5581:5581 \
+  basim123/chicken-counter:latest
+```
+
+Pin to a version tag in production: `basim123/chicken-counter:1.0.0`.
+
+### Build from source — CPU (default)
 
 ```bash
 docker compose up --build
@@ -451,7 +493,7 @@ docker compose up --build
 
 No host prerequisites beyond Docker itself. Inference runs on CPU.
 
-### GPU (NVIDIA)
+### Build from source — GPU (NVIDIA)
 
 ```bash
 docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
