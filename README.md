@@ -41,11 +41,21 @@ Each class has its own **independent tracker and counter** — counts never blee
 
 ### Option A: Docker (recommended)
 
+The same image runs on both CPU and GPU hosts — it auto-selects the device at startup and logs which one it chose.
+
+**CPU (default):**
+
 ```bash
 docker compose up --build
 ```
 
-Open **http://localhost:5581**
+**GPU (NVIDIA + [nvidia-container-toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) required):**
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+```
+
+Open **http://localhost:5581**. The container logs a `[startup] CUDA available: ...` line so you can confirm the selected device. `GET /health` also reports it.
 
 ### Option B: Local Setup
 
@@ -431,21 +441,46 @@ Slaughtered_Chicken_Counting/
 
 ## Docker
 
-### Build and run
+The image is a **single artifact** that works on both CPU and GPU hosts. PyTorch's CUDA-12.6 wheel is bundled and falls back to CPU automatically when no GPU is visible; the startup script logs which device was selected.
+
+### CPU (default)
 
 ```bash
 docker compose up --build
 ```
 
-### GPU support
+No host prerequisites beyond Docker itself. Inference runs on CPU.
 
-`docker-compose.yml` includes NVIDIA GPU reservation. Requires:
-- [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+### GPU (NVIDIA)
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
+```
+
+The override file `docker-compose.gpu.yml` adds an NVIDIA device reservation on top of the default compose file. Requires:
+
+- [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html) installed on the host
 - Docker configured with the `nvidia` runtime
 
-### CPU-only
+### Verifying the selected device
 
-Remove the `deploy.resources.reservations` block from `docker-compose.yml`.
+Check the container logs after startup:
+
+```bash
+docker compose logs --tail=5 chicken-counter
+# [startup] CUDA available: true
+# [startup] GPU: NVIDIA GeForce RTX 4090
+```
+
+Or hit the health endpoint:
+
+```bash
+curl http://localhost:5581/health
+```
+
+### Endpoints that require a GPU
+
+- `POST /api/export/tensorrt` — builds a TensorRT engine; requires CUDA. On CPU runs the endpoint returns a `FAILED` status with the ultralytics error; the rest of the app is unaffected.
 
 ---
 
