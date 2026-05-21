@@ -33,13 +33,16 @@ class StreamCreate(BaseModel):
     url: str = Field(..., description="RTSP/HTTP URL of the source feed")
     roi_position: Optional[float] = Field(None, description="ROI as fraction 0..1 of frame width")
     confidence: Optional[float] = Field(None, description="YOLO confidence threshold (0..1)")
+    conf_empty_shackles: Optional[float] = Field(None, description="Confidence threshold for empty_shackles class only (overrides global confidence)")
     nms_iou: Optional[float] = Field(None, description="NMS IoU threshold (0..1)")
     imgsz: Optional[int] = Field(None, description="Inference image size (multiple of 32)")
     max_distance: Optional[int] = Field(None, description="Tracker max pixel distance")
     max_disappeared: Optional[int] = Field(None, description="Frames before lost track is dropped")
+    zone_half: Optional[int] = Field(None, description="Half-width of counting zone in pixels (zone = roi_x ± zone_half)")
+    appear_margin: Optional[int] = Field(None, description="Max px past zone_left where a brand-new track is still counted")
     start_counting: bool = Field(True, description="Begin counting immediately on register")
 
-    @field_validator("roi_position", "confidence", "nms_iou")
+    @field_validator("roi_position", "confidence", "nms_iou", "conf_empty_shackles")
     @classmethod
     def _zero_one(cls, v):
         if v is not None and not (0.0 < v < 1.0):
@@ -53,7 +56,7 @@ class StreamCreate(BaseModel):
             raise ValueError("imgsz must be a multiple of 32")
         return v
 
-    @field_validator("max_distance", "max_disappeared")
+    @field_validator("max_distance", "max_disappeared", "zone_half", "appear_margin")
     @classmethod
     def _positive(cls, v):
         if v is not None and v < 1:

@@ -14,7 +14,9 @@ class VideoProcessor:
 
     def __init__(self, source: str, model, roi_x: int, confidence: float = 0.25,
                  nms_iou: float = 0.45, imgsz: int = 640,
-                 max_disappeared: int = 15, max_distance: int = 50,
+                 max_disappeared: int = 15, max_distance: int = 55,
+                 zone_half: int = 50, appear_margin: int = 60,
+                 conf_empty_shackles: float = 0.15,
                  save_raw_path: str = None, is_stream: bool = False):
         self.source = source
         # `model` kept for backward-compat construction; actual inference
@@ -22,6 +24,15 @@ class VideoProcessor:
         self.model = model
         self.roi_x = roi_x
         self.confidence = confidence
+        # Per-class confidence thresholds. Inference runs at the lowest of
+        # these so no class is suppressed inside YOLO; post-inference
+        # filtering then applies each class's own threshold.
+        self._class_conf = {
+            "empty_shackles":      conf_empty_shackles,
+            "single_legged":       confidence,
+            "slaughtered_chicken": confidence,
+        }
+        self._infer_conf = min(self._class_conf.values())
         self.nms_iou = nms_iou
         self.imgsz = imgsz
         self.is_stream = is_stream
@@ -29,7 +40,9 @@ class VideoProcessor:
         self.dropped_frames = 0
 
         self.counter = ChickenCounter(roi_x=roi_x, max_disappeared=max_disappeared,
-                                      max_distance=max_distance)
+                                      max_distance=max_distance,
+                                      zone_half=zone_half,
+                                      appear_margin=appear_margin)
 
         self.is_playing = False
         self.is_counting = False
@@ -141,7 +154,7 @@ class VideoProcessor:
                 fps_timer = time.time()
 
             try:
-                future = try_submit(frame, self.confidence, self.nms_iou,
+                future = try_submit(frame, self._infer_conf, self.nms_iou,
                                     self.imgsz, agnostic_nms=True)
             except QueueFull:
                 self.dropped_frames += 1
@@ -152,6 +165,13 @@ class VideoProcessor:
                 self.error = f"Inference failed: {exc}"
                 self.dropped_frames += 1
                 continue
+
+            # Apply per-class confidence thresholds. YOLO ran at the global
+            # minimum; drop anything below its own class's threshold here.
+            det_info = [
+                d for d in det_info
+                if d["conf"] >= self._class_conf.get(d["class_name"], self.confidence)
+            ]
 
             objects_by_class: dict = {}
             if self.is_counting:

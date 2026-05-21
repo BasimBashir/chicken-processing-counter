@@ -60,7 +60,7 @@ def _compute_iou(b1, b2):
 class CentroidTracker:
     """Hungarian-assignment tracker with IoU-aware cost matrix."""
 
-    def __init__(self, max_disappeared=15, max_distance=50):
+    def __init__(self, max_disappeared=15, max_distance=55):
         self.next_id = 0
         self.objects = OrderedDict()   # id → (cx, cy)
         self.bboxes = OrderedDict()    # id → (x1, y1, x2, y2)
@@ -177,7 +177,13 @@ def draw_trail(img, points, base_color):
     cv2.addWeighted(overlay, 0.7, img, 0.3, 0, img)
 
 
-def draw_roi_line(img, roi_x, height, frame_num):
+def draw_roi_line(img, roi_x, height, frame_num, zone_left=None):
+    # Zone entry edge (dashed, dimmer)
+    if zone_left is not None and zone_left < roi_x:
+        cv2.line(img, (zone_left, 0), (zone_left, height), (60, 60, 160), 1, cv2.LINE_AA)
+        cv2.putText(img, "ZONE", (zone_left + 3, 14),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, (100, 100, 200), 1, cv2.LINE_AA)
+    # Main ROI / counting line
     cv2.line(img, (roi_x, 0), (roi_x, height), COLORS["roi_glow"], 6, cv2.LINE_AA)
     dash_len, gap_len = 20, 12
     offset = (frame_num * 2) % (dash_len + gap_len)
@@ -330,8 +336,8 @@ def detect_and_annotate_image(model, image_path, conf_threshold=0.25, save_path=
 
 def detect_and_annotate_video(
     model, video_path, conf_threshold=0.25, nms_iou=0.45, imgsz=640,
-    save_path=None, roi_position=0.5, max_disappeared=15, max_distance=50,
-    appear_margin=25,
+    save_path=None, roi_position=0.5, max_disappeared=15, max_distance=55,
+    appear_margin=60, zone_half=50, conf_empty_shackles=0.15,
 ):
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -344,7 +350,8 @@ def detect_and_annotate_video(
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     is_stream = total_frames <= 0
 
-    roi_x = int(width * roi_position)
+    roi_x      = int(width * roi_position)
+    zone_left  = max(0, roi_x - zone_half)
 
     writer = None
     if save_path:
@@ -360,10 +367,19 @@ def detect_and_annotate_video(
     frame_num    = 0
     trail_length = 18
 
+    class_conf = {
+        "empty_shackles":      conf_empty_shackles,
+        "single_legged":       conf_threshold,
+        "slaughtered_chicken": conf_threshold,
+    }
+    infer_conf = min(class_conf.values())
+
     fps_timer, fps_display, fps_frame_count = time.time(), 0.0, 0
 
     print(f"Processing: {video_path}")
-    print(f"Vertical ROI at x={roi_x} ({roi_position*100:.0f}% from left) — left-to-right conveyor")
+    print(f"Counting zone: x=[{zone_left}, {roi_x + appear_margin}]  "
+          f"(ROI centre {roi_x} | zone_half {zone_half} | appear_margin {appear_margin})")
+    print(f"Per-class conf: {class_conf}  (inference runs at {infer_conf})")
 
     while True:
         ret, frame = cap.read()
@@ -380,7 +396,7 @@ def detect_and_annotate_video(
             fps_frame_count = 0
             fps_timer = time.time()
 
-        results = model(frame, conf=conf_threshold, iou=nms_iou, imgsz=imgsz,
+        results = model(frame, conf=infer_conf, iou=nms_iou, imgsz=imgsz,
                         agnostic_nms=True, verbose=False)
 
         by_class: dict[str, list] = {cls: [] for cls in CLASSES}
@@ -390,6 +406,8 @@ def detect_and_annotate_video(
             cls_idx = int(box.cls[0])
             cls = model.names.get(cls_idx, str(cls_idx))
             conf = float(box.conf[0])
+            if conf < class_conf.get(cls, conf_threshold):
+                continue
             cx, cy = (x1 + x2) // 2, (y1 + y2) // 2
             det_info.append({"x1": x1, "y1": y1, "x2": x2, "y2": y2,
                               "conf": conf, "class_name": cls})
@@ -417,13 +435,15 @@ def detect_and_annotate_video(
                     continue
                 px = prev_cx[cls].get(obj_id)
                 if px is None:
-                    # First appearance just past the line: count once.
-                    # Deeper appearances are flicker re-acquisitions — skip.
-                    if roi_x <= cx <= roi_x + appear_margin:
+                    # Brand-new track: count if centroid is anywhere in the zone.
+                    # Tracks appearing deep past the zone are re-acquisitions of
+                    # already-counted objects — skip them.
+                    if zone_left <= cx <= roi_x + appear_margin:
                         counts[cls] += 1
                         counted_ids[cls].add(obj_id)
                         flash_events.append((int(cx), int(cy), cls, frame_num))
-                elif px < roi_x <= cx:
+                elif px < zone_left <= cx:
+                    # Track just entered the zone from the left → count.
                     counts[cls] += 1
                     counted_ids[cls].add(obj_id)
                     flash_events.append((int(cx), int(cy), cls, frame_num))
@@ -450,7 +470,7 @@ def detect_and_annotate_video(
             draw_bbox(annotated, info["x1"], info["y1"],
                       info["x2"], info["y2"], is_counted, info["conf"], cls)
 
-        draw_roi_line(annotated, roi_x, height, frame_num)
+        draw_roi_line(annotated, roi_x, height, frame_num, zone_left)
 
         active_flashes = []
         for (fx, fy, cls, f_start) in flash_events:
@@ -496,22 +516,28 @@ if __name__ == "__main__":
     )
     parser.add_argument("input", help="Path to image, video file, or RTSP stream URL")
     parser.add_argument("--save", default=None, help="Path to save annotated output")
-    parser.add_argument("--conf", type=float, default=0.25, help="Confidence threshold (default: 0.25)")
+    parser.add_argument("--conf", type=float, default=0.25, help="Global confidence threshold (default: 0.25)")
+    parser.add_argument("--conf-empty-shackles", type=float, default=0.15,
+                        help="Confidence threshold for empty_shackles class (default: 0.15)")
     parser.add_argument("--iou", type=float, default=0.45, help="NMS IoU threshold (default: 0.45)")
     parser.add_argument("--imgsz", type=int, default=640, help="Inference image size (default: 640)")
     parser.add_argument("--model", default=MODEL_PATH, help="Path to YOLO model weights")
     parser.add_argument(
-        "--roi", type=float, default=0.5,
+        "--roi", type=float, default=0.60,
         help="Vertical ROI line position as fraction of frame width 0–1 (default: 0.5)"
     )
-    parser.add_argument("--max-distance", type=int, default=50,
-                        help="Max pixel distance for track matching (default: 50)")
+    parser.add_argument("--max-distance", type=int, default=55,
+                        help="Max pixel distance for track matching (default: 55). "
+                             "Must be > px_per_frame but < shackle_spacing_px/2")
     parser.add_argument("--max-disappeared", type=int, default=15,
                         help="Frames before a lost track is dropped (default: 15)")
-    parser.add_argument("--appear-margin", type=int, default=25,
-                        help="Px past ROI within which a brand-new track is counted; "
-                             "deeper first appearances are treated as flicker re-acquires "
-                             "(default: 25)")
+    parser.add_argument("--zone-half", type=int, default=50,
+                        help="Half-width of counting zone in px; counting triggers at "
+                             "roi_x - zone_half instead of roi_x (default: 50)")
+    parser.add_argument("--appear-margin", type=int, default=60,
+                        help="Max px past zone_left where a brand-new track is counted; "
+                             "deeper first appearances are treated as re-acquisitions "
+                             "(default: 60)")
     args = parser.parse_args()
 
     model = load_model(args.model)
@@ -522,7 +548,8 @@ if __name__ == "__main__":
             model, args.input, conf_threshold=args.conf, nms_iou=args.iou, imgsz=args.imgsz,
             save_path=args.save, roi_position=args.roi,
             max_distance=args.max_distance, max_disappeared=args.max_disappeared,
-            appear_margin=args.appear_margin,
+            appear_margin=args.appear_margin, zone_half=args.zone_half,
+            conf_empty_shackles=args.conf_empty_shackles,
         )
     else:
         image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}
@@ -543,6 +570,8 @@ if __name__ == "__main__":
                 model, args.input, conf_threshold=args.conf, nms_iou=args.iou, imgsz=args.imgsz,
                 save_path=args.save, roi_position=args.roi,
                 max_distance=args.max_distance, max_disappeared=args.max_disappeared,
+                appear_margin=args.appear_margin, zone_half=args.zone_half,
+                conf_empty_shackles=args.conf_empty_shackles,
             )
         else:
             print(f"Error: Unsupported file extension '{ext}'")

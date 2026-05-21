@@ -15,10 +15,13 @@ class ConfigPatch(BaseModel):
     model_path: Optional[str] = None
     roi_position: Optional[float] = None
     confidence: Optional[float] = None
+    conf_empty_shackles: Optional[float] = None
     nms_iou: Optional[float] = None
     imgsz: Optional[int] = None
     max_distance: Optional[int] = None
     max_disappeared: Optional[int] = None
+    zone_half: Optional[int] = None
+    appear_margin: Optional[int] = None
 
     @field_validator("roi_position")
     @classmethod
@@ -27,7 +30,7 @@ class ConfigPatch(BaseModel):
             raise ValueError("roi_position must be between 0 and 1 exclusive")
         return v
 
-    @field_validator("confidence")
+    @field_validator("confidence", "conf_empty_shackles")
     @classmethod
     def conf_in_range(cls, v):
         if v is not None and not (0.0 < v < 1.0):
@@ -48,7 +51,7 @@ class ConfigPatch(BaseModel):
             raise ValueError("imgsz must be a multiple of 32")
         return v
 
-    @field_validator("max_distance", "max_disappeared")
+    @field_validator("max_distance", "max_disappeared", "zone_half", "appear_margin")
     @classmethod
     def positive_int(cls, v):
         if v is not None and v < 1:

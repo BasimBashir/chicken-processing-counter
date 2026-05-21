@@ -1,12 +1,12 @@
 task: detect
 mode: train
-model: yolo26s.pt
+model: yolo26m.pt
 data: C:\Users\mianx\OneDrive\Desktop\Slaughtered_Chicken_Counting\dataset\data.yaml
 epochs: 50
 time: null
 patience: 10
-batch: 16
-imgsz: 640
+batch: -1
+imgsz: 1280
 save: true
 save_period: -1
 cache: disk
@@ -29,7 +29,7 @@ amp: true
 fraction: 1.0
 profile: false
 freeze: null
-multi_scale: 0.0
+multi_scale: 0.3
 compile: false
 overlap_mask: true
 mask_ratio: 4

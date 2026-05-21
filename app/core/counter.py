@@ -16,20 +16,20 @@ class ChickenCounter:
     Conveyor moves left-to-right. ROI line is vertical at roi_x.
     Each class uses an independent tracker to avoid cross-class ID collisions.
 
-    Counting rules (mirroring WingCounter but on the x-axis):
-    - New track first appears within `appear_margin` px to the right of roi_x:
-      count immediately (object entered frame already just past the line).
-      Detections deeper past the line are assumed to be flickered re-acquisitions
-      of an already-counted track and are NOT counted.
-    - Track crosses roi_x left→right (prev_cx < roi_x <= cx): count once.
+    Counting rules — zone-based, left-to-right conveyor:
+    - Counting zone: [roi_x - zone_half, roi_x + appear_margin]
+    - Existing track: counted when it first enters the zone left edge (zone_left).
+    - Brand-new track: counted if its first centroid lands within the zone.
+    - Tracks first appearing deep past the zone are skipped (re-acquisitions).
     """
 
     def __init__(self, roi_x: int, max_disappeared: int = 15,
-                 max_distance: int = 50, trail_length: int = 18,
-                 appear_margin: int = 25):
+                 max_distance: int = 55, trail_length: int = 18,
+                 appear_margin: int = 60, zone_half: int = 50):
         self.roi_x = roi_x
         self.trail_length = trail_length
         self.appear_margin = appear_margin
+        self.zone_half = zone_half
         self.trackers = {cls: CentroidTracker(max_disappeared, max_distance) for cls in CLASSES}
         self.counts = {cls: 0 for cls in CLASSES}
         self.counted_ids = {cls: set() for cls in CLASSES}
@@ -69,7 +69,13 @@ class ChickenCounter:
                 if key[0] == cls and key[1] not in active_ids:
                     del self.trails[key]
 
-            # Check x-crossings (left-to-right)
+            # Zone-based counting (left-to-right conveyor).
+            # Objects are counted the first time their centroid enters the zone
+            # [zone_left, roi_x + appear_margin]. Using the zone left edge as
+            # the trigger (rather than roi_x) gives zone_half/px_per_frame extra
+            # frames of opportunity before the count fires — critical when the
+            # model occasionally misses a detection near the ROI line.
+            zone_left = max(0, self.roi_x - self.zone_half)
             for obj_id, (cx, cy) in objects.items():
                 if obj_id in self.counted_ids[cls]:
                     continue
@@ -77,15 +83,16 @@ class ChickenCounter:
                 self.last_cx[cls][obj_id] = cx
 
                 if prev_cx is None:
-                    # First appearance just past the line: count once. A track
-                    # appearing deep past the line is almost certainly a flicker
-                    # re-acquisition of an already-counted chicken — skip it.
-                    if self.roi_x <= cx <= self.roi_x + self.appear_margin:
+                    # Brand-new track: count if centroid landed anywhere in the
+                    # zone. Tracks appearing deep past the zone are likely
+                    # re-acquisitions of an already-counted object — skip them.
+                    if zone_left <= cx <= self.roi_x + self.appear_margin:
                         self.counts[cls] += 1
                         self.counted_ids[cls].add(obj_id)
                         self.flash_events.append((int(cx), int(cy), cls))
-                elif prev_cx < self.roi_x <= cx:
-                    # Crossed the line this frame
+                elif prev_cx < zone_left <= cx:
+                    # Track just entered the zone from the left → count.
+                    # Also fires when conveyor skips the zone entirely in one frame.
                     self.counts[cls] += 1
                     self.counted_ids[cls].add(obj_id)
                     self.flash_events.append((int(cx), int(cy), cls))

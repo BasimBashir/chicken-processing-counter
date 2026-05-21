@@ -23,8 +23,8 @@ from app.core.video_processor import VideoProcessor
 log = logging.getLogger("stream_registry")
 
 _OVERRIDE_KEYS = {
-    "roi_position", "confidence", "nms_iou", "imgsz",
-    "max_distance", "max_disappeared",
+    "roi_position", "confidence", "conf_empty_shackles", "nms_iou", "imgsz",
+    "max_distance", "max_disappeared", "zone_half", "appear_margin",
 }
 
 
@@ -96,6 +96,9 @@ class StreamRegistry:
                 imgsz=cfg["imgsz"],
                 max_disappeared=cfg["max_disappeared"],
                 max_distance=cfg["max_distance"],
+                zone_half=cfg["zone_half"],
+                appear_margin=cfg["appear_margin"],
+                conf_empty_shackles=cfg["conf_empty_shackles"],
                 is_stream=True,
             )
             self._streams[stream_id] = processor
@@ -207,8 +210,8 @@ class StreamRegistry:
     @staticmethod
     def _merge_overrides(snap: dict, overrides: dict) -> dict:
         cfg = {k: snap[k] for k in (
-            "roi_position", "confidence", "nms_iou", "imgsz",
-            "max_distance", "max_disappeared",
+            "roi_position", "confidence", "conf_empty_shackles", "nms_iou", "imgsz",
+            "max_distance", "max_disappeared", "zone_half", "appear_margin",
         )}
         for k, v in overrides.items():
             if k in cfg and v is not None:

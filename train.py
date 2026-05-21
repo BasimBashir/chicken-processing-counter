@@ -42,13 +42,14 @@ def main():
         )
 
     # Load YOLO26s pretrained on COCO (transfer learning)
-    model = YOLO("yolo26s.pt")
+    model = YOLO("yolo26m.pt")
 
     model.train(
         data=data_path,
         epochs=50,
-        imgsz=640,
-        batch=16,
+        imgsz=1280,
+        multi_scale=0.3,
+        batch=-1,
         patience=10,
         device=0,               # GPU 0; change to "cpu" if no GPU
 

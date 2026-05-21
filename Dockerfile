@@ -15,7 +15,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ app/
 COPY best.pt .
-COPY .env .
 
 RUN mkdir -p app/uploads app/outputs
 

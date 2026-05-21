@@ -5,12 +5,15 @@ class Settings(BaseSettings):
     # ── Detection / counting defaults ──────────────────────────────────────
     rtsp_url: str = ""
     model_path: str = "best.pt"
-    roi_position: float = 0.5
+    roi_position: float = 0.60
     confidence: float = 0.25
+    conf_empty_shackles: float = 0.15
     nms_iou: float = 0.45
     imgsz: int = 640
-    max_distance: int = 50
+    max_distance: int = 55
     max_disappeared: int = 15
+    zone_half: int = 50
+    appear_margin: int = 60
 
     # ── Filesystem ─────────────────────────────────────────────────────────
     upload_dir: str = "app/uploads"
@@ -21,7 +24,7 @@ class Settings(BaseSettings):
     #   RTSP_STREAMS='[{"id":"line-1","url":"rtsp://cam1/stream"},
     #                  {"id":"line-2","url":"rtsp://cam2/stream","roi_position":0.6}]'
     # Each entry must have id and url. Optional per-stream overrides:
-    # roi_position, confidence, nms_iou, imgsz, max_distance, max_disappeared.
+    # roi_position, confidence, nms_iou, imgsz, max_distance, max_disappeared, zone_half, appear_margin.
     rtsp_streams: str = ""
     max_streams: int = 10
 
