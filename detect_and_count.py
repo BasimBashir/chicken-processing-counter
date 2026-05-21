@@ -331,6 +331,7 @@ def detect_and_annotate_image(model, image_path, conf_threshold=0.25, save_path=
 def detect_and_annotate_video(
     model, video_path, conf_threshold=0.25, nms_iou=0.45, imgsz=640,
     save_path=None, roi_position=0.5, max_disappeared=15, max_distance=50,
+    appear_margin=25,
 ):
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
@@ -379,7 +380,8 @@ def detect_and_annotate_video(
             fps_frame_count = 0
             fps_timer = time.time()
 
-        results = model(frame, conf=conf_threshold, iou=nms_iou, imgsz=imgsz, verbose=False)
+        results = model(frame, conf=conf_threshold, iou=nms_iou, imgsz=imgsz,
+                        agnostic_nms=True, verbose=False)
 
         by_class: dict[str, list] = {cls: [] for cls in CLASSES}
         det_info = []
@@ -415,7 +417,9 @@ def detect_and_annotate_video(
                     continue
                 px = prev_cx[cls].get(obj_id)
                 if px is None:
-                    if cx >= roi_x:
+                    # First appearance just past the line: count once.
+                    # Deeper appearances are flicker re-acquisitions — skip.
+                    if roi_x <= cx <= roi_x + appear_margin:
                         counts[cls] += 1
                         counted_ids[cls].add(obj_id)
                         flash_events.append((int(cx), int(cy), cls, frame_num))
@@ -428,12 +432,6 @@ def detect_and_annotate_video(
             for old_id in list(prev_cx[cls]):
                 if old_id not in active_ids:
                     del prev_cx[cls][old_id]
-
-            for cid in list(counted_ids[cls]):
-                if trackers[cls].disappeared.get(cid, 0) > 0:
-                    trackers[cls]._deregister(cid)
-                    counted_ids[cls].discard(cid)
-                    prev_cx[cls].pop(cid, None)
 
         annotated = frame.copy()
 
@@ -510,6 +508,10 @@ if __name__ == "__main__":
                         help="Max pixel distance for track matching (default: 50)")
     parser.add_argument("--max-disappeared", type=int, default=15,
                         help="Frames before a lost track is dropped (default: 15)")
+    parser.add_argument("--appear-margin", type=int, default=25,
+                        help="Px past ROI within which a brand-new track is counted; "
+                             "deeper first appearances are treated as flicker re-acquires "
+                             "(default: 25)")
     args = parser.parse_args()
 
     model = load_model(args.model)
@@ -520,6 +522,7 @@ if __name__ == "__main__":
             model, args.input, conf_threshold=args.conf, nms_iou=args.iou, imgsz=args.imgsz,
             save_path=args.save, roi_position=args.roi,
             max_distance=args.max_distance, max_disappeared=args.max_disappeared,
+            appear_margin=args.appear_margin,
         )
     else:
         image_exts = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".webp"}

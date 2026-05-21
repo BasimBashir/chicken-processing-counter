@@ -1,11 +1,13 @@
 from typing import Optional
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
+from app.core.auth import verify_api_key
 from app.core.runtime_config import runtime_config
 from app.core.model_cache import get_model
 
-router = APIRouter(prefix="/api/config", tags=["config"])
+router = APIRouter(prefix="/api/config", tags=["config"],
+                   dependencies=[Depends(verify_api_key)])
 
 
 class ConfigPatch(BaseModel):

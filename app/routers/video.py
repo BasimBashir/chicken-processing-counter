@@ -1,14 +1,16 @@
 import os
 import uuid
 import shutil
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
 from fastapi.responses import StreamingResponse, FileResponse
 
+from app.core.auth import verify_api_key
 from app.core.runtime_config import runtime_config
 from app.core.model_cache import get_model
 from app.core.video_processor import VideoProcessor
 
-router = APIRouter(prefix="/api/video", tags=["video"])
+router = APIRouter(prefix="/api/video", tags=["video"],
+                   dependencies=[Depends(verify_api_key)])
 
 _sessions: dict[str, VideoProcessor] = {}
 

@@ -17,16 +17,19 @@ class ChickenCounter:
     Each class uses an independent tracker to avoid cross-class ID collisions.
 
     Counting rules (mirroring WingCounter but on the x-axis):
-    - New track first appears at or to the right of roi_x: count immediately
-      (object entered frame already past the line).
+    - New track first appears within `appear_margin` px to the right of roi_x:
+      count immediately (object entered frame already just past the line).
+      Detections deeper past the line are assumed to be flickered re-acquisitions
+      of an already-counted track and are NOT counted.
     - Track crosses roi_x left→right (prev_cx < roi_x <= cx): count once.
-    - Counted tracks are retired on first disappearance to free their ID.
     """
 
     def __init__(self, roi_x: int, max_disappeared: int = 15,
-                 max_distance: int = 50, trail_length: int = 18):
+                 max_distance: int = 50, trail_length: int = 18,
+                 appear_margin: int = 25):
         self.roi_x = roi_x
         self.trail_length = trail_length
+        self.appear_margin = appear_margin
         self.trackers = {cls: CentroidTracker(max_disappeared, max_distance) for cls in CLASSES}
         self.counts = {cls: 0 for cls in CLASSES}
         self.counted_ids = {cls: set() for cls in CLASSES}
@@ -74,8 +77,10 @@ class ChickenCounter:
                 self.last_cx[cls][obj_id] = cx
 
                 if prev_cx is None:
-                    # First appearance: already past the line
-                    if cx >= self.roi_x:
+                    # First appearance just past the line: count once. A track
+                    # appearing deep past the line is almost certainly a flicker
+                    # re-acquisition of an already-counted chicken — skip it.
+                    if self.roi_x <= cx <= self.roi_x + self.appear_margin:
                         self.counts[cls] += 1
                         self.counted_ids[cls].add(obj_id)
                         self.flash_events.append((int(cx), int(cy), cls))
@@ -88,12 +93,6 @@ class ChickenCounter:
             for old_id in list(self.last_cx[cls].keys()):
                 if old_id not in active_ids:
                     del self.last_cx[cls][old_id]
-
-            # Retire counted tracks immediately on first disappearance
-            for cid in list(self.counted_ids[cls]):
-                tracker = self.trackers[cls]
-                if cid in tracker.disappeared and tracker.disappeared[cid] > 0:
-                    tracker._deregister(cid)
 
         return all_objects
 

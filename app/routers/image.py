@@ -1,13 +1,15 @@
 import cv2
 import numpy as np
-from fastapi import APIRouter, UploadFile, File
+from fastapi import APIRouter, Depends, UploadFile, File
 from fastapi.responses import Response
 
-from app.config import settings
-from app.core.detector import load_model, detect_frame
+from app.core.auth import verify_api_key
+from app.core.runtime_config import runtime_config
+from app.core.inference_worker import get_worker
 from app.core.annotator import annotate_image_detections
 
-router = APIRouter(prefix="/api/image", tags=["image"])
+router = APIRouter(prefix="/api/image", tags=["image"],
+                   dependencies=[Depends(verify_api_key)])
 
 
 @router.post("/detect")
@@ -19,8 +21,11 @@ async def detect_image(file: UploadFile = File(...)):
     if frame is None:
         return Response(content="Invalid image", status_code=400)
 
-    model = load_model(settings.model_path)
-    det_info = detect_frame(model, frame, settings.confidence)
+    snap = runtime_config.snapshot()
+    det_info = get_worker().submit_sync(
+        frame, snap["confidence"], snap["nms_iou"], snap["imgsz"],
+        agnostic_nms=True,
+    )
     annotated, class_counts = annotate_image_detections(frame, det_info)
 
     _, jpeg = cv2.imencode(".jpg", annotated, [cv2.IMWRITE_JPEG_QUALITY, 95])

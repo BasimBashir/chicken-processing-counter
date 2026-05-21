@@ -4,9 +4,9 @@ import threading
 import subprocess
 import os
 
-from app.core.detector import detect_frame
 from app.core.counter import ChickenCounter, CLASSES
 from app.core.annotator import annotate_detections
+from app.core.inference_worker import try_submit, QueueFull
 
 
 class VideoProcessor:
@@ -17,6 +17,8 @@ class VideoProcessor:
                  max_disappeared: int = 15, max_distance: int = 50,
                  save_raw_path: str = None, is_stream: bool = False):
         self.source = source
+        # `model` kept for backward-compat construction; actual inference
+        # goes through the shared InferenceWorker now.
         self.model = model
         self.roi_x = roi_x
         self.confidence = confidence
@@ -24,6 +26,7 @@ class VideoProcessor:
         self.imgsz = imgsz
         self.is_stream = is_stream
         self.save_raw_path = save_raw_path
+        self.dropped_frames = 0
 
         self.counter = ChickenCounter(roi_x=roi_x, max_disappeared=max_disappeared,
                                       max_distance=max_distance)
@@ -87,6 +90,7 @@ class VideoProcessor:
             "fps": round(self.fps_display, 1),
             "is_complete": self.is_complete,
             "is_stream": self.is_stream,
+            "dropped_frames": self.dropped_frames,
             "error": self.error,
         }
 
@@ -136,7 +140,18 @@ class VideoProcessor:
                 fps_frame_count = 0
                 fps_timer = time.time()
 
-            det_info = detect_frame(self.model, frame, self.confidence, self.nms_iou, self.imgsz)
+            try:
+                future = try_submit(frame, self.confidence, self.nms_iou,
+                                    self.imgsz, agnostic_nms=True)
+            except QueueFull:
+                self.dropped_frames += 1
+                continue
+            try:
+                det_info = future.result(timeout=2.0)
+            except Exception as exc:
+                self.error = f"Inference failed: {exc}"
+                self.dropped_frames += 1
+                continue
 
             objects_by_class: dict = {}
             if self.is_counting:

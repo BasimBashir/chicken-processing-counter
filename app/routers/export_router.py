@@ -1,10 +1,12 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from app.core.auth import verify_api_key
 from app.core.exporter import exporter, ExportState
 from app.core.runtime_config import runtime_config
 
-router = APIRouter(prefix="/api/export", tags=["export"])
+router = APIRouter(prefix="/api/export", tags=["export"],
+                   dependencies=[Depends(verify_api_key)])
 
 
 class ExportRequest(BaseModel):

@@ -4,9 +4,9 @@ model: yolo26s.pt
 data: C:\Users\mianx\OneDrive\Desktop\Slaughtered_Chicken_Counting\dataset\data.yaml
 epochs: 50
 time: null
-patience: 5
+patience: 10
 batch: 16
-imgsz: 512
+imgsz: 640
 save: true
 save_period: -1
 cache: disk

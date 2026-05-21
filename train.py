@@ -47,9 +47,9 @@ def main():
     model.train(
         data=data_path,
         epochs=50,
-        imgsz=512,
+        imgsz=640,
         batch=16,
-        patience=5,
+        patience=10,
         device=0,               # GPU 0; change to "cpu" if no GPU
 
         # Optimizer

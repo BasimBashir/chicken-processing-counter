@@ -18,7 +18,8 @@ def load_model(model_path: str) -> YOLO:
 def detect_frame(model: YOLO, frame: np.ndarray, conf: float = 0.25,
                  iou: float = 0.45, imgsz: int = 640) -> list[dict]:
     """Run inference on a single frame. Returns list of detection dicts with class_name."""
-    results = model(frame, conf=conf, iou=iou, imgsz=imgsz, verbose=False)
+    results = model(frame, conf=conf, iou=iou, imgsz=imgsz,
+                    agnostic_nms=True, verbose=False)
     det_info = []
     for box in results[0].boxes:
         x1, y1, x2, y2 = map(int, box.xyxy[0].tolist())
