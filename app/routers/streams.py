@@ -138,6 +138,7 @@ def reset_counts(stream_id: str):
     Useful for shift changes or after recalibrating ROI."""
     proc = _resolve(stream_id)
     proc.counter.reset()
+    proc.counter_alt.reset()
     return {"status": "reset", "id": stream_id,
             "counts": {cls: 0 for cls in CLASSES}}
 

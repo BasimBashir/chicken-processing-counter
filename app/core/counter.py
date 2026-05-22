@@ -1,4 +1,3 @@
-from collections import deque
 from app.core.tracker import CentroidTracker
 
 CLASSES = ["empty_shackles", "single_legged", "slaughtered_chicken"]
@@ -11,30 +10,30 @@ def _det_to_tuple(d):
 
 
 class ChickenCounter:
-    """Per-class centroid tracker with vertical ROI line crossing logic.
+    """Virtual Tripwire counter based on X-axis progression.
 
-    Conveyor moves left-to-right. ROI line is vertical at roi_x.
-    Each class uses an independent tracker to avoid cross-class ID collisions.
-
-    Counting rules — zone-based, left-to-right conveyor:
-    - Counting zone: [roi_x - zone_half, roi_x + appear_margin]
-    - Existing track: counted when it first enters the zone left edge (zone_left).
-    - Brand-new track: counted if its first centroid lands within the zone.
-    - Tracks first appearing deep past the zone are skipped (re-acquisitions).
+    Counting rule (independent of any tracker):
+      A detection is counted on the frame its bbox crosses
+      `roi_x`.
     """
 
     def __init__(self, roi_x: int, max_disappeared: int = 15,
-                 max_distance: int = 55, trail_length: int = 18,
-                 appear_margin: int = 60, zone_half: int = 50):
+                 max_distance: int = 55, conveyor_speed_px: float = 14.0):
         self.roi_x = roi_x
-        self.trail_length = trail_length
-        self.appear_margin = appear_margin
-        self.zone_half = zone_half
+        
+        # Straddle Tracker parameters
+        self.conveyor_speed_px = conveyor_speed_px
+        self.max_x_distance = 40
+        self.max_straddle_disappeared = 10
+
+        # Tracker kept solely for the overlay's #ID labels — no count side-effects.
         self.trackers = {cls: CentroidTracker(max_disappeared, max_distance) for cls in CLASSES}
+
         self.counts = {cls: 0 for cls in CLASSES}
-        self.counted_ids = {cls: set() for cls in CLASSES}
-        self.last_cx = {cls: {} for cls in CLASSES}
-        self.trails: dict = {}
+        # active_crossings stores dicts: {'cls': cls, 'last_cx': cx, 'last_seen_frame': frame_num}
+        self.active_crossings: list[dict] = []
+        self.frame_num = 0
+
         self.flash_events: list = []
 
     @property
@@ -42,9 +41,12 @@ class ChickenCounter:
         return sum(self.counts.values())
 
     def update(self, det_info: list[dict]) -> dict:
-        """Process detections for one frame.
-        Returns {class_name: {obj_id: (cx, cy)}} for all active tracked objects.
+        """Process detections for one frame. Returns {class_name: {obj_id: (cx, cy)}}
+        from the debug tracker for annotating IDs on video.
         """
+        self.frame_num += 1
+
+        # 1) Run the debug tracker per class.
         by_class: dict[str, list] = {cls: [] for cls in CLASSES}
         for d in det_info:
             cls = d.get("class_name", "slaughtered_chicken")
@@ -52,62 +54,69 @@ class ChickenCounter:
                 by_class[cls].append(_det_to_tuple(d))
 
         all_objects: dict[str, dict] = {}
-
         for cls in CLASSES:
-            objects = self.trackers[cls].update(by_class[cls])
-            all_objects[cls] = dict(objects)
-            active_ids = set(objects.keys())
+            all_objects[cls] = dict(self.trackers[cls].update(by_class[cls]))
 
-            # Update trails
-            for obj_id, (cx, cy) in objects.items():
-                key = (cls, obj_id)
-                if key not in self.trails:
-                    self.trails[key] = deque(maxlen=self.trail_length)
-                self.trails[key].append((int(cx), int(cy)))
+        # 2) Straddle Tracker Logic (Virtual Tripwire)
+        straddlers = []
+        for d in det_info:
+            cls = d.get("class_name", "slaughtered_chicken")
+            if cls not in self.counts:
+                continue
+            
+            # Check if bbox mathematically straddles the roi line
+            x1, x2 = d["x1"], d["x2"]
+            if x1 <= self.roi_x <= x2:
+                cx = (x1 + x2) // 2
+                cy = (d["y1"] + d["y2"]) // 2
+                straddlers.append((cx, cy, cls))
 
-            for key in list(self.trails.keys()):
-                if key[0] == cls and key[1] not in active_ids:
-                    del self.trails[key]
+        matched_crossings = set()
 
-            # Zone-based counting (left-to-right conveyor).
-            # Objects are counted the first time their centroid enters the zone
-            # [zone_left, roi_x + appear_margin]. Using the zone left edge as
-            # the trigger (rather than roi_x) gives zone_half/px_per_frame extra
-            # frames of opportunity before the count fires — critical when the
-            # model occasionally misses a detection near the ROI line.
-            zone_left = max(0, self.roi_x - self.zone_half)
-            for obj_id, (cx, cy) in objects.items():
-                if obj_id in self.counted_ids[cls]:
+        for cx, cy, cls in straddlers:
+            best_match_idx = -1
+            best_dist = float('inf')
+
+            # Try to match to an active crossing
+            for i, crossing in enumerate(self.active_crossings):
+                if crossing['cls'] != cls or i in matched_crossings:
                     continue
-                prev_cx = self.last_cx[cls].get(obj_id)
-                self.last_cx[cls][obj_id] = cx
+                
+                frames_elapsed = self.frame_num - crossing['last_seen_frame']
+                predicted_cx = crossing['last_cx'] + (frames_elapsed * self.conveyor_speed_px)
+                
+                dist = abs(cx - predicted_cx)
+                if dist < self.max_x_distance and dist < best_dist:
+                    best_match_idx = i
+                    best_dist = dist
+            
+            if best_match_idx != -1:
+                # Update existing crossing
+                self.active_crossings[best_match_idx]['last_cx'] = cx
+                self.active_crossings[best_match_idx]['last_seen_frame'] = self.frame_num
+                matched_crossings.add(best_match_idx)
+            else:
+                # New crossing!
+                self.counts[cls] += 1
+                self.active_crossings.append({
+                    'cls': cls,
+                    'last_cx': cx,
+                    'last_seen_frame': self.frame_num
+                })
+                self.flash_events.append((cx, cy, cls))
 
-                if prev_cx is None:
-                    # Brand-new track: count if centroid landed anywhere in the
-                    # zone. Tracks appearing deep past the zone are likely
-                    # re-acquisitions of an already-counted object — skip them.
-                    if zone_left <= cx <= self.roi_x + self.appear_margin:
-                        self.counts[cls] += 1
-                        self.counted_ids[cls].add(obj_id)
-                        self.flash_events.append((int(cx), int(cy), cls))
-                elif prev_cx < zone_left <= cx:
-                    # Track just entered the zone from the left → count.
-                    # Also fires when conveyor skips the zone entirely in one frame.
-                    self.counts[cls] += 1
-                    self.counted_ids[cls].add(obj_id)
-                    self.flash_events.append((int(cx), int(cy), cls))
-
-            for old_id in list(self.last_cx[cls].keys()):
-                if old_id not in active_ids:
-                    del self.last_cx[cls][old_id]
+        # Expire old crossings
+        self.active_crossings = [
+            c for c in self.active_crossings
+            if (self.frame_num - c['last_seen_frame']) <= self.max_straddle_disappeared
+        ]
 
         return all_objects
 
     def reset(self):
+        """Reset counts/state."""
         for cls in CLASSES:
-            self.trackers[cls].reset()
             self.counts[cls] = 0
-            self.counted_ids[cls] = set()
-            self.last_cx[cls] = {}
-        self.trails = {}
+        self.active_crossings.clear()
+        self.frame_num = 0
         self.flash_events = []

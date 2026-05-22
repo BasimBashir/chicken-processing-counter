@@ -15,7 +15,6 @@ class VideoProcessor:
     def __init__(self, source: str, model, roi_x: int, confidence: float = 0.25,
                  nms_iou: float = 0.45, imgsz: int = 640,
                  max_disappeared: int = 15, max_distance: int = 55,
-                 zone_half: int = 50, appear_margin: int = 60,
                  conf_empty_shackles: float = 0.15,
                  save_raw_path: str = None, is_stream: bool = False):
         self.source = source
@@ -40,9 +39,7 @@ class VideoProcessor:
         self.dropped_frames = 0
 
         self.counter = ChickenCounter(roi_x=roi_x, max_disappeared=max_disappeared,
-                                      max_distance=max_distance,
-                                      zone_half=zone_half,
-                                      appear_margin=appear_margin)
+                                      max_distance=max_distance)
 
         self.is_playing = False
         self.is_counting = False
@@ -198,17 +195,9 @@ class VideoProcessor:
                 frame=frame,
                 detections=det_info,
                 objects_by_class=objects_by_class,
-                counted_ids_by_class=self.counter.counted_ids if self.is_counting
-                                     else {cls: set() for cls in CLASSES},
-                trails=self.counter.trails,
                 flash_events=flash_with_frame,
                 roi_x=self.counter.roi_x if self.is_counting else None,
                 frame_num=self.frame_num,
-                counts=self.counter.counts if self.is_counting
-                       else {cls: 0 for cls in CLASSES},
-                total_frames=self.total_frames,
-                is_stream=self.is_stream,
-                fps_display=self.fps_display,
             )
 
             if self._writer:

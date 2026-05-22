@@ -3,17 +3,27 @@ from pydantic_settings import BaseSettings
 
 class Settings(BaseSettings):
     # ── Detection / counting defaults ──────────────────────────────────────
+    # Tuned for fast conveyor on 848x478 source @ 25 fps with ~10-13 bboxes
+    # per frame. Key insight from sample video: with imgsz=1280 actual loop
+    # FPS drops to 11-18 (below source), so inter-processed-frame motion
+    # spikes well above 50 px → tracks split → counts missed. Lowering imgsz
+    # to 640 (source is already 848 wide, so no detail lost) lets inference
+    # keep up at source FPS, then the tracker thresholds rarely matter.
     rtsp_url: str = ""
     model_path: str = "best.pt"
     roi_position: float = 0.60
-    confidence: float = 0.25
-    conf_empty_shackles: float = 0.15
-    nms_iou: float = 0.45
+    confidence: float = 0.15
+    conf_empty_shackles: float = 0.10
+    # NMS uses agnostic_nms=True (across classes) to avoid double bboxes on
+    # the same object. The IoU threshold here controls how aggressive that is:
+    # lower = more suppression (risk: chicken near shackle suppresses the
+    # chicken). 0.70 means only boxes overlapping >70% are merged, so adjacent
+    # chicken/shackle pairs (typical IoU 0.3-0.5) both survive.
+    nms_iou: float = 0.80
     imgsz: int = 640
-    max_distance: int = 55
-    max_disappeared: int = 15
-    zone_half: int = 50
-    appear_margin: int = 60
+    max_distance: int = 90
+    max_disappeared: int = 6
+
 
     # ── Filesystem ─────────────────────────────────────────────────────────
     upload_dir: str = "app/uploads"
@@ -29,9 +39,10 @@ class Settings(BaseSettings):
     max_streams: int = 10
 
     # ── Batched inference worker ───────────────────────────────────────────
-    batch_max: int = 16
-    batch_window_ms: int = 25
-    inference_queue_max: int = 100
+    # Sized for ~10 streams × 25 fps = 250 fps aggregate throughput.
+    batch_max: int = 32
+    batch_window_ms: int = 10
+    inference_queue_max: int = 400
 
     # ── Auth ───────────────────────────────────────────────────────────────
     # If empty, /api/* endpoints are open (dev mode). Set in production to

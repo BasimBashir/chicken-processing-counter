@@ -119,6 +119,7 @@ class InferenceWorker:
             results = self._model(
                 frames, conf=conf, iou=iou, imgsz=imgsz,
                 agnostic_nms=agnostic_nms, verbose=False,
+                device=0, half=True  # Force RTX 3090 optimizations: CUDA + FP16
             )
         except Exception as exc:
             log.exception("Batch inference failed (n=%d): %s", len(jobs), exc)

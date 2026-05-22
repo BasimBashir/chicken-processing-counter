@@ -11,7 +11,11 @@ def get_model(path: str) -> YOLO:
         return _cache[path]
     with _lock:
         if path not in _cache:
-            _cache[path] = YOLO(path)
+            model = YOLO(path)
+            # Explicit GPU optimizations
+            model.to('cuda:0')
+            # model.fuse() # Handled automatically by YOLOv8 during first inference, but good practice
+            _cache[path] = model
         return _cache[path]
 
 

@@ -55,7 +55,9 @@ class CentroidTracker:
             return self.objects
 
         if len(self.objects) == 0:
-            for d in norm:
+            # Register rightmost first so leftmost (newest chicken on a
+            # left→right conveyor) ends up with the highest ID.
+            for d in sorted(norm, key=lambda x: -x[0]):
                 self._register(d)
             return self.objects
 
@@ -102,9 +104,12 @@ class CentroidTracker:
                 if self.disappeared[obj_id] > self.max_disappeared:
                     self._deregister(obj_id)
 
-        for col in range(len(norm)):
-            if col not in used_cols:
-                self._register(norm[col])
+        # Register unmatched detections rightmost-first so the leftmost
+        # incoming chicken always picks up the highest new ID this frame.
+        unmatched_cols = [c for c in range(len(norm)) if c not in used_cols]
+        unmatched_cols.sort(key=lambda c: -norm[c][0])
+        for col in unmatched_cols:
+            self._register(norm[col])
 
         return self.objects
 
