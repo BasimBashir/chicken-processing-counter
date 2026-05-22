@@ -12,17 +12,17 @@ class Settings(BaseSettings):
     rtsp_url: str = ""
     model_path: str = "best.pt"
     roi_position: float = 0.60
-    confidence: float = 0.15
-    conf_empty_shackles: float = 0.10
+    confidence: float = 0.25 #0.30
+    conf_empty_shackles: float = 0.45
     # NMS uses agnostic_nms=True (across classes) to avoid double bboxes on
     # the same object. The IoU threshold here controls how aggressive that is:
     # lower = more suppression (risk: chicken near shackle suppresses the
     # chicken). 0.70 means only boxes overlapping >70% are merged, so adjacent
     # chicken/shackle pairs (typical IoU 0.3-0.5) both survive.
-    nms_iou: float = 0.80
-    imgsz: int = 640
+    nms_iou: float = 0.45
+    imgsz: int = 1280
     max_distance: int = 90
-    max_disappeared: int = 6
+    max_disappeared: int = 2
 
 
     # ── Filesystem ─────────────────────────────────────────────────────────

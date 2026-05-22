@@ -76,6 +76,32 @@ docker run -d --name chicken-counter --gpus all -p 5581:5581 \
   basim123/chicken-counter:latest
 ```
 
+**Pull and run — GPU + TensorRT (recommended for throughput)**
+
+Adds `TRT_AUTO_BUILD=1` to build a host-specific TensorRT engine on first boot (2–6 min on RTX 3090, longer on smaller cards), and an `engine_cache` named volume so subsequent boots reuse it. The engine is keyed by `{GPU, TRT version, precision, imgsz, best.pt hash}` — safe to deploy the same image on any NVIDIA host.
+
+```bash
+docker pull basim123/chicken-counter:latest
+
+docker volume create engine_cache  # one-time, persists the built engine
+
+docker run -d --name chicken-counter --gpus all -p 5581:5581 \
+  -e API_KEY=replace-with-long-random-string \
+  -e TRT_AUTO_BUILD=1 \
+  -v $(pwd)/uploads:/app/app/uploads \
+  -v $(pwd)/outputs:/app/app/outputs \
+  -v engine_cache:/app/engine_cache \
+  basim123/chicken-counter:latest
+
+# First boot: watch the build progress (2-6 min on RTX 3090)
+docker logs -f chicken-counter | grep -E '^\[trt\]|MODEL_PATH'
+```
+
+Behaviour mirrors the local-developer setup exactly:
+- All tuning values (`imgsz=1280`, `confidence=0.25`, `roi_position=0.60`, etc.) come from the `app/config.py` defaults baked into the image — same as a local `uvicorn` run.
+- FP16 engine output may shift per-frame confidences by ~0.01–0.05 vs the `.pt` baseline; totals per video typically stay within ~1%. Set `-e TRT_HALF=false` to build FP32 if you need full `.pt` parity (slower).
+- Skip the volume to test, but every container restart will rebuild the engine — fine for one-shots, painful in production.
+
 **Pull and run — multi-stream auto-start** (declare all your cameras in one go)
 
 ```bash
@@ -106,22 +132,27 @@ Open **http://localhost:5581** for the dashboard, or **http://localhost:5581/doc
 
 **Environment variables you can pass to `-e`**
 
+All defaults below come from `app/config.py` — the container reads them via pydantic-settings, exactly like a local `uvicorn app.main:app` run. Compose passes env vars through only when set, so an unset var means the Python default applies. Container and local-uvicorn behavior are identical when neither has the var set.
+
 | Var | Default | Purpose |
 |-----|---------|---------|
 | `API_KEY` | _(empty → no auth, dev only)_ | Required on every `/api/*` request as `X-API-Key` header |
 | `RTSP_STREAMS` | _(empty)_ | JSON list of streams to auto-register on boot |
 | `MAX_STREAMS` | `10` | Soft cap on concurrent streams |
 | `RTSP_URL` | _(empty)_ | Default URL for the legacy `/api/stream/*` single-stream API |
-| `MODEL_PATH` | `best.pt` | Path to YOLO weights inside the container |
-| `ROI_POSITION` | `0.5` | Global ROI line as fraction of frame width |
+| `MODEL_PATH` | `best.pt` | Path to YOLO weights inside the container. Promoted to `best.engine` automatically when `TRT_AUTO_BUILD=1`. |
+| `TRT_AUTO_BUILD` | `0` | Opt-in TensorRT engine auto-build on first boot. Disabled by default — container runs `best.pt`. Set `1` to enable. |
+| `TRT_HALF` | `true` | FP16 precision when `TRT_AUTO_BUILD=1`. Set `false` for FP32 (slower, marginally more accurate). |
+| `ROI_POSITION` | `0.60` | Global ROI line as fraction of frame width |
 | `CONFIDENCE` | `0.25` | Global YOLO confidence threshold |
+| `CONF_EMPTY_SHACKLES` | `0.45` | Per-class confidence override for `empty_shackles` |
 | `NMS_IOU` | `0.45` | Global NMS IoU threshold |
-| `IMGSZ` | `640` | Global inference image size |
-| `MAX_DISTANCE` | `50` | Tracker max pixel distance |
-| `MAX_DISAPPEARED` | `15` | Frames before a lost track is dropped |
-| `BATCH_MAX` | `16` | Max frames per batched forward pass |
-| `BATCH_WINDOW_MS` | `25` | Max time worker waits to fill a batch |
-| `INFERENCE_QUEUE_MAX` | `100` | Inference backlog cap before frames are dropped |
+| `IMGSZ` | `1280` | Global inference image size |
+| `MAX_DISTANCE` | `90` | Tracker max pixel distance |
+| `MAX_DISAPPEARED` | `2` | Frames before a lost track is dropped |
+| `BATCH_MAX` | `32` | Max frames per batched forward pass |
+| `BATCH_WINDOW_MS` | `10` | Max time worker waits to fill a batch |
+| `INFERENCE_QUEUE_MAX` | `400` | Inference backlog cap before frames are dropped |
 
 For client examples in Python, Node.js, and other languages, see [INTEGRATION.md](INTEGRATION.md). For the full per-endpoint reference, see [REST API Reference](#rest-api-reference) below.
 
@@ -144,6 +175,112 @@ python -m venv .venv
 pip install -r requirements.txt
 uvicorn app.main:app --host 0.0.0.0 --port 5581
 ```
+
+---
+
+## Production GPU Deployment (TensorRT)
+
+> **Disabled by default.** The container ships with `TRT_AUTO_BUILD=0` so every host runs `best.pt` for predictable, `.pt`-equivalent counts. Set `TRT_AUTO_BUILD=1` to opt into the auto-build pattern below — useful when you need the 2–4× throughput boost and have validated that the `.engine`-vs-`.pt` count drift (typically <1%) is acceptable for your line.
+
+A TensorRT `.engine` typically runs **2–4× faster** than the `.pt` model on the same GPU. The catch: an engine file is locked to the host it was built on — specifically to the `{GPU compute capability, TensorRT version, CUDA/cuDNN version, precision, imgsz, source .pt}` tuple. **Shipping a pre-built engine in the image breaks portability** across VPS hardware (3090 ≠ 4090 ≠ T4 ≠ L4, even within the same vendor).
+
+When opted in, the container handles this with a **build-on-first-boot** pattern: ship only `best.pt`, build the engine on the target machine on first launch, cache it to a named volume, and reuse it on every subsequent boot.
+
+### How it works
+
+```
+docker compose up           docker compose up
+   (first boot)                 (every boot after)
+        │                            │
+        ▼                            ▼
+  no cached engine?              engine present?
+        │                            │
+   build engine                 reuse cached engine
+   (2-6 min on 3090)            (instant)
+        │                            │
+  symlink best.engine ──────▶ symlink best.engine
+        │                            │
+   exec uvicorn                 exec uvicorn
+```
+
+The cache key is composed from:
+```
+{GPU_name}_{compute_cap}_trt{trt_version}_{fp16|fp32}_imgsz{N}_pt{sha256_8}.engine
+```
+e.g. `NVIDIA_GeForce_RTX_3090_sm86_trt10.4.0_fp16_imgsz640_pt9a7e21f3.engine`.
+
+Cached engines live in a Docker named volume (`engine_cache`) so they survive container restarts and image rebuilds. Swapping in a new `best.pt` invalidates the cache automatically via the file hash.
+
+### Deploying to a VPS — DevOps cheat sheet
+
+The same image runs everywhere. No per-VPS image variants needed.
+
+```bash
+# On the VPS — one-time setup
+#   1. NVIDIA driver (>= 545 for TRT 10.x)
+#   2. nvidia-container-toolkit
+#      https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
+
+# Pull and start with GPU
+docker pull basim123/chicken-counter:latest
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+
+# First boot: container shows "starting" for 2-15 min while TRT builds.
+# Watch progress:
+docker compose logs -f chicken-counter | grep "^\[trt\]"
+
+# Sample log on a fresh host:
+#   [trt] gpu=NVIDIA_GeForce_RTX_4090 sm89  trt=10.4.0  prec=fp16  imgsz=640  pt=9a7e21f3
+#   [trt] cache key: NVIDIA_GeForce_RTX_4090_sm89_trt10.4.0_fp16_imgsz640_pt9a7e21f3.engine
+#   [trt] no cached engine — building (2-6 min on RTX 3090; longer on smaller GPUs)
+#   [trt] cached engine at /app/engine_cache/NVIDIA_GeForce_RTX_4090_sm89_...
+#   [trt] active engine: /app/best.engine -> NVIDIA_GeForce_RTX_4090_sm89_...
+#   [startup] CUDA available: True
+#   [startup] GPU: NVIDIA GeForce RTX 4090
+#   [startup] MODEL_PATH=best.engine
+
+# Subsequent boots reuse the cache and start in seconds.
+```
+
+### Force a rebuild (e.g. after upgrading TRT)
+
+The cache key includes the TRT version, so an upgrade auto-invalidates. To force-rebuild for any other reason:
+
+```bash
+docker compose down
+docker volume rm slaughtered_chicken_counting_engine_cache   # name = <project>_engine_cache
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d
+```
+
+Or trigger a re-export at runtime without rebuilding the cache key:
+```bash
+curl -X POST -H "X-API-Key: $KEY" http://localhost:5581/api/export/tensorrt
+```
+
+### Skip TRT and run on `.pt`
+
+CPU-only hosts, or GPU hosts where you want to bypass the build for any reason:
+
+```yaml
+environment:
+  - TRT_AUTO_BUILD=0
+```
+
+The entrypoint detects no CUDA / no TRT / missing module automatically and falls back to `.pt` without failing the container.
+
+### What can go wrong
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| Healthcheck shows `unhealthy` for 10+ min | Slow GPU builds engine longer than `start_period` (900s) | Raise `start_period` further, or pre-warm the volume from a faster host with matching GPU class |
+| `[trt] tensorrt module unavailable` | TRT pip wheel didn't install (cold pip cache, network) | `docker compose build --no-cache` |
+| `[trt] export failed: ...` | Out-of-memory on small GPU, or driver/TRT mismatch | Drop `IMGSZ` to `512`, or upgrade host driver to match TRT version |
+| Engine builds every restart | Named volume not mounted (e.g. using `docker run` without `-v engine_cache:/app/engine_cache`) | Use the compose file, or pass `-v engine_cache:/app/engine_cache` explicitly |
+| `TensorRT engine load failed: serialized engine was built for compute capability X.Y` | Wrong cache used (manual copy from another host) | Delete the engine_cache volume and let it rebuild |
+
+### Windows 11 dev host (your machine)
+
+Docker Desktop + WSL2 + the NVIDIA driver gives you GPU-in-container the same way Linux does. The build-on-first-boot pattern works identically — first boot generates `best.engine` for your 3090; subsequent boots reuse it. The named volume lives inside the WSL2 distro, so `docker volume rm` is the way to clear it.
 
 ---
 
@@ -454,6 +591,8 @@ Per-stream registration overrides take precedence over the global config — `PA
 
 ### TensorRT Export — `/api/export/tensorrt`
 
+For **production deployments**, you usually don't call this — the container already builds and caches an engine on first boot (see [Production GPU Deployment](#production-gpu-deployment-tensorrt)). Use this endpoint to re-export at runtime, e.g. after changing `imgsz` via `PATCH /api/config`, or to validate that the export path works on a new host.
+
 #### `POST /api/export/tensorrt`
 Start background FP16 engine export (body `{"half": true|false}`, default true). Returns `201` if started, `409` if one is already in flight.
 
@@ -486,24 +625,29 @@ States: `IDLE` (no export ever run), `RUNNING`, `DONE`, `FAILED` (with `error` f
 `.env` (all fields also settable as environment variables):
 
 ```env
-# ── Defaults applied when a stream/request doesn't override ────────────────
+# Every key is OPTIONAL — unset keys fall through to the Python defaults
+# in app/config.py. The example below shows the current defaults; only
+# include lines you actually want to override.
+
+# ── Detection / counting defaults ─────────────────────────────────────────
 RTSP_URL=
 MODEL_PATH=best.pt
-ROI_POSITION=0.5
+ROI_POSITION=0.60
 CONFIDENCE=0.25
+CONF_EMPTY_SHACKLES=0.45
 NMS_IOU=0.45
-IMGSZ=640
-MAX_DISTANCE=50
-MAX_DISAPPEARED=15
+IMGSZ=1280
+MAX_DISTANCE=90
+MAX_DISAPPEARED=2
 
 # ── Multi-stream auto-start ───────────────────────────────────────────────
 RTSP_STREAMS='[{"id":"line-1","url":"rtsp://cam1.local/stream"}]'
 MAX_STREAMS=10
 
 # ── Batched inference tuning ──────────────────────────────────────────────
-BATCH_MAX=16
-BATCH_WINDOW_MS=25
-INFERENCE_QUEUE_MAX=100
+BATCH_MAX=32
+BATCH_WINDOW_MS=10
+INFERENCE_QUEUE_MAX=400
 
 # ── Auth ──────────────────────────────────────────────────────────────────
 API_KEY=replace-with-a-long-random-value
@@ -513,9 +657,9 @@ API_KEY=replace-with-a-long-random-value
 
 | Var | Default | Effect when increased |
 |-----|---------|-----------------------|
-| `BATCH_MAX` | 16 | Larger batches → higher throughput, slightly more per-frame latency |
-| `BATCH_WINDOW_MS` | 25 | Worker waits longer for batchmates → bigger batches but more MJPEG lag |
-| `INFERENCE_QUEUE_MAX` | 100 | More backlog tolerance before frames get dropped under spikes |
+| `BATCH_MAX` | 32 | Larger batches → higher throughput, slightly more per-frame latency |
+| `BATCH_WINDOW_MS` | 10 | Worker waits longer for batchmates → bigger batches but more MJPEG lag |
+| `INFERENCE_QUEUE_MAX` | 400 | More backlog tolerance before frames get dropped under spikes |
 
 If you see non-zero `dropped_frames` in a stream's status, either raise `BATCH_WINDOW_MS` (better packing) or use a larger GPU.
 
@@ -617,6 +761,8 @@ docker compose -f docker-compose.yml -f docker-compose.gpu.yml up --build
 ```
 
 The compose file includes a `healthcheck` hitting `/health` every 30s. `docker ps` will show `(healthy)` / `(unhealthy)` once the container is up.
+
+> **GPU first-boot:** the container builds a TensorRT engine on first launch (2–15 min depending on the GPU) and caches it to the `engine_cache` named volume. Subsequent boots reuse it. See [Production GPU Deployment](#production-gpu-deployment-tensorrt) for the full pattern.
 
 ### Build and push to Docker Hub
 

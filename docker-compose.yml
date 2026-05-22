@@ -7,28 +7,42 @@ services:
     volumes:
       - ./app/uploads:/app/app/uploads
       - ./app/outputs:/app/app/outputs
+      # Persisted TensorRT engine cache — engines are built on first boot on the
+      # target GPU and reused on subsequent boots. Keyed by GPU+TRT+precision+pt-hash.
+      - engine_cache:/app/engine_cache
     environment:
-      - RTSP_URL=${RTSP_URL:-}
-      - MODEL_PATH=best.pt
-      - ROI_POSITION=${ROI_POSITION:-0.5}
-      - CONFIDENCE=${CONFIDENCE:-0.25}
-      - NMS_IOU=${NMS_IOU:-0.45}
-      - IMGSZ=${IMGSZ:-640}
-      - MAX_DISTANCE=${MAX_DISTANCE:-40}
-      - MAX_DISAPPEARED=${MAX_DISAPPEARED:-50}
-      # Multi-stream auto-start (JSON list of {id,url,...})
-      - RTSP_STREAMS=${RTSP_STREAMS:-}
-      - MAX_STREAMS=${MAX_STREAMS:-10}
-      # Batched inference worker tuning
-      - BATCH_MAX=${BATCH_MAX:-16}
-      - BATCH_WINDOW_MS=${BATCH_WINDOW_MS:-25}
-      - INFERENCE_QUEUE_MAX=${INFERENCE_QUEUE_MAX:-100}
-      # API auth — set in production
-      - API_KEY=${API_KEY:-}
+      # Pass-through only — unset vars fall through to the Python defaults in
+      # app/config.py, so container behavior matches local `uvicorn app.main:app`.
+      # To override, export in your shell or set in .env before `docker compose up`.
+      # MODEL_PATH is also promoted by docker-entrypoint.sh when TRT_AUTO_BUILD=1.
+      - RTSP_URL
+      - MODEL_PATH
+      - ROI_POSITION
+      - CONFIDENCE
+      - CONF_EMPTY_SHACKLES
+      - NMS_IOU
+      - IMGSZ
+      - MAX_DISTANCE
+      - MAX_DISAPPEARED
+      - RTSP_STREAMS
+      - MAX_STREAMS
+      - BATCH_MAX
+      - BATCH_WINDOW_MS
+      - INFERENCE_QUEUE_MAX
+      - API_KEY
+      # TensorRT auto-build is opt-in (set TRT_AUTO_BUILD=1 to enable).
+      - TRT_AUTO_BUILD=${TRT_AUTO_BUILD:-0}
+      - TRT_HALF=${TRT_HALF:-true}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:5581/health"]
       interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 30s
+      # First boot on a new GPU builds the TRT engine (2-6 min on a 3090,
+      # 10-15 min on smaller cards). Cached boots are fast — but the window
+      # has to tolerate the cold case.
+      start_period: 900s
     restart: unless-stopped
+
+volumes:
+  engine_cache:

@@ -12,9 +12,11 @@ def get_model(path: str) -> YOLO:
     with _lock:
         if path not in _cache:
             model = YOLO(path)
-            # Explicit GPU optimizations
-            model.to('cuda:0')
-            # model.fuse() # Handled automatically by YOLOv8 during first inference, but good practice
+            # .pt is a PyTorch module and needs explicit device placement.
+            # Exported formats (.engine, .onnx) have device baked in at export time
+            # and Ultralytics raises TypeError if you call .to() on them.
+            if path.endswith(".pt"):
+                model.to('cuda:0')
             _cache[path] = model
         return _cache[path]
 

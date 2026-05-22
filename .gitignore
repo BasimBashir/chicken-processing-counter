@@ -13,4 +13,6 @@ app/outputs/
 dataset
 yolo26n.pt
 yolo26s.pt
+yolo26m.pt
 dataset/
+runs/*
