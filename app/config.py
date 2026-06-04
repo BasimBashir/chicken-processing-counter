@@ -23,6 +23,14 @@ class Settings(BaseSettings):
     imgsz: int = 1280
     max_distance: int = 90
     max_disappeared: int = 2
+    # Belt travel per processed frame (px), used to seed per-track velocity
+    # estimation in the counter. ~34 px/frame on the 1280-wide sub-stream
+    # (6in shackle pitch, 119cm FOV, ~311 shackles/min). Self-tunes at runtime.
+    conveyor_speed_px: float = 34.0
+    # Half-width (px) of the counting band around roi_x. Band total width =
+    # 2*zone_half. Wider band tolerates bbox flicker / brief frame stutter so
+    # a bird crossing the line is not missed. 0 = single-pixel tripwire.
+    zone_half: int = 15
 
 
     # ── Filesystem ─────────────────────────────────────────────────────────

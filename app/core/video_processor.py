@@ -16,6 +16,7 @@ class VideoProcessor:
                  nms_iou: float = 0.45, imgsz: int = 640,
                  max_disappeared: int = 15, max_distance: int = 55,
                  conf_empty_shackles: float = 0.15,
+                 conveyor_speed_px: float = 34.0, zone_half: int = 15,
                  save_raw_path: str = None, is_stream: bool = False):
         self.source = source
         # `model` kept for backward-compat construction; actual inference
@@ -39,7 +40,9 @@ class VideoProcessor:
         self.dropped_frames = 0
 
         self.counter = ChickenCounter(roi_x=roi_x, max_disappeared=max_disappeared,
-                                      max_distance=max_distance)
+                                      max_distance=max_distance,
+                                      conveyor_speed_px=conveyor_speed_px,
+                                      zone_half=zone_half)
 
         self.is_playing = False
         self.is_counting = False

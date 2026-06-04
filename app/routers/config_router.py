@@ -22,6 +22,7 @@ class ConfigPatch(BaseModel):
     max_disappeared: Optional[int] = None
     zone_half: Optional[int] = None
     appear_margin: Optional[int] = None
+    conveyor_speed_px: Optional[float] = None
 
     @field_validator("roi_position")
     @classmethod
@@ -51,11 +52,25 @@ class ConfigPatch(BaseModel):
             raise ValueError("imgsz must be a multiple of 32")
         return v
 
-    @field_validator("max_distance", "max_disappeared", "zone_half", "appear_margin")
+    @field_validator("max_distance", "max_disappeared", "appear_margin")
     @classmethod
     def positive_int(cls, v):
         if v is not None and v < 1:
             raise ValueError("must be >= 1")
+        return v
+
+    @field_validator("zone_half")
+    @classmethod
+    def zone_half_nonneg(cls, v):
+        if v is not None and v < 0:
+            raise ValueError("zone_half must be >= 0")
+        return v
+
+    @field_validator("conveyor_speed_px")
+    @classmethod
+    def speed_positive(cls, v):
+        if v is not None and v <= 0:
+            raise ValueError("conveyor_speed_px must be > 0")
         return v
 
 

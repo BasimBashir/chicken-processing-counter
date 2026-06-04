@@ -26,11 +26,13 @@ class ChickenCounter:
     """
 
     def __init__(self, roi_x: int, max_disappeared: int = 15,
-                 max_distance: int = 55, conveyor_speed_px: float = 14.0):
+                 max_distance: int = 55, conveyor_speed_px: float = 34.0,
+                 zone_half: int = 15):
         self.roi_x = roi_x
-        
+
         # Straddle Tracker parameters
         self.conveyor_speed_px = conveyor_speed_px
+        self.zone_half = zone_half
         self.max_x_distance = 40
         self.max_straddle_disappeared = 10
 
