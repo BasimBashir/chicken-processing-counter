@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     # keep up at source FPS, then the tracker thresholds rarely matter.
     rtsp_url: str = ""
     model_path: str = "best.pt"
-    roi_position: float = 0.60
+    roi_position: float = 0.65
     confidence: float = 0.25 #0.30
     conf_empty_shackles: float = 0.45
     # NMS uses agnostic_nms=True (across classes) to avoid double bboxes on

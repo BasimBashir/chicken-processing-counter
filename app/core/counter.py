@@ -2,6 +2,13 @@ from app.core.tracker import CentroidTracker
 
 CLASSES = ["empty_shackles", "single_legged", "slaughtered_chicken"]
 
+# Classes that count toward the headline total compared against the BAADER
+# weight counter. Currently empty_shackles + slaughtered_chicken; add
+# "single_legged" here when that class is brought online. Classes left out
+# are still detected, tracked, and shown in the per-class breakdown for
+# diagnostics — they just don't inflate the total.
+COUNTED_CLASSES = ["empty_shackles", "slaughtered_chicken"]
+
 
 def _det_to_tuple(d):
     cx = (d["x1"] + d["x2"]) // 2
@@ -38,7 +45,7 @@ class ChickenCounter:
 
     @property
     def total_count(self) -> int:
-        return sum(self.counts.values())
+        return sum(self.counts[c] for c in COUNTED_CLASSES)
 
     def update(self, det_info: list[dict]) -> dict:
         """Process detections for one frame. Returns {class_name: {obj_id: (cx, cy)}}
