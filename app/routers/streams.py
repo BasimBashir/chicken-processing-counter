@@ -38,8 +38,9 @@ class StreamCreate(BaseModel):
     imgsz: Optional[int] = Field(None, description="Inference image size (multiple of 32)")
     max_distance: Optional[int] = Field(None, description="Tracker max pixel distance")
     max_disappeared: Optional[int] = Field(None, description="Frames before lost track is dropped")
-    zone_half: Optional[int] = Field(None, description="Half-width of counting zone in pixels (zone = roi_x ± zone_half)")
+    zone_half: Optional[int] = Field(None, description="Half-width of counting zone in pixels (zone = roi_x ± zone_half); 0 = single-pixel tripwire")
     appear_margin: Optional[int] = Field(None, description="Max px past zone_left where a brand-new track is still counted")
+    conveyor_speed_px: Optional[float] = Field(None, description="Belt travel per processed frame (px); seeds per-track velocity estimation")
     start_counting: bool = Field(True, description="Begin counting immediately on register")
 
     @field_validator("roi_position", "confidence", "nms_iou", "conf_empty_shackles")
@@ -56,11 +57,25 @@ class StreamCreate(BaseModel):
             raise ValueError("imgsz must be a multiple of 32")
         return v
 
-    @field_validator("max_distance", "max_disappeared", "zone_half", "appear_margin")
+    @field_validator("max_distance", "max_disappeared", "appear_margin")
     @classmethod
     def _positive(cls, v):
         if v is not None and v < 1:
             raise ValueError("must be >= 1")
+        return v
+
+    @field_validator("zone_half")
+    @classmethod
+    def _zone_half_nonneg(cls, v):
+        if v is not None and v < 0:
+            raise ValueError("zone_half must be >= 0")
+        return v
+
+    @field_validator("conveyor_speed_px")
+    @classmethod
+    def _speed_positive(cls, v):
+        if v is not None and v <= 0:
+            raise ValueError("conveyor_speed_px must be > 0")
         return v
 
 
@@ -138,7 +153,6 @@ def reset_counts(stream_id: str):
     Useful for shift changes or after recalibrating ROI."""
     proc = _resolve(stream_id)
     proc.counter.reset()
-    proc.counter_alt.reset()
     return {"status": "reset", "id": stream_id,
             "counts": {cls: 0 for cls in CLASSES}}
 

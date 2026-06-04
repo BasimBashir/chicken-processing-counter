@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     #   RTSP_STREAMS='[{"id":"line-1","url":"rtsp://cam1/stream"},
     #                  {"id":"line-2","url":"rtsp://cam2/stream","roi_position":0.6}]'
     # Each entry must have id and url. Optional per-stream overrides:
-    # roi_position, confidence, nms_iou, imgsz, max_distance, max_disappeared, zone_half, appear_margin.
+    # roi_position, confidence, nms_iou, imgsz, max_distance, max_disappeared, zone_half, appear_margin, conveyor_speed_px.
     rtsp_streams: str = ""
     max_streams: int = 10
 
