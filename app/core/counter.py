@@ -36,6 +36,11 @@ class ChickenCounter:
         self.max_x_distance = 40
         self.max_straddle_disappeared = 10
 
+        # Per-track velocity estimation. Each crossing learns its own px/frame
+        # via EMA of observed motion, seeded by conveyor_speed_px.
+        self.velocity_ema = 0.3          # weight of newest observation
+        self.max_velocity_px = 120.0     # reject implausible jumps
+
         # Tracker kept solely for the overlay's #ID labels — no count side-effects.
         self.trackers = {cls: CentroidTracker(max_disappeared, max_distance) for cls in CLASSES}
 
@@ -93,7 +98,7 @@ class ChickenCounter:
                     continue
                 
                 frames_elapsed = self.frame_num - crossing['last_seen_frame']
-                predicted_cx = crossing['last_cx'] + (frames_elapsed * self.conveyor_speed_px)
+                predicted_cx = crossing['last_cx'] + (frames_elapsed * crossing['velocity'])
                 
                 dist = abs(cx - predicted_cx)
                 if dist < self.max_x_distance and dist < best_dist:
@@ -101,9 +106,16 @@ class ChickenCounter:
                     best_dist = dist
             
             if best_match_idx != -1:
-                # Update existing crossing
-                self.active_crossings[best_match_idx]['last_cx'] = cx
-                self.active_crossings[best_match_idx]['last_seen_frame'] = self.frame_num
+                # Update existing crossing + learn its velocity from motion.
+                c = self.active_crossings[best_match_idx]
+                frames_elapsed = self.frame_num - c['last_seen_frame']
+                if frames_elapsed > 0:
+                    observed_v = (cx - c['last_cx']) / frames_elapsed
+                    if 0 < observed_v < self.max_velocity_px:
+                        c['velocity'] = (self.velocity_ema * observed_v
+                                         + (1 - self.velocity_ema) * c['velocity'])
+                c['last_cx'] = cx
+                c['last_seen_frame'] = self.frame_num
                 matched_crossings.add(best_match_idx)
             else:
                 # New crossing!
@@ -111,7 +123,8 @@ class ChickenCounter:
                 self.active_crossings.append({
                     'cls': cls,
                     'last_cx': cx,
-                    'last_seen_frame': self.frame_num
+                    'last_seen_frame': self.frame_num,
+                    'velocity': self.conveyor_speed_px,
                 })
                 self.flash_events.append((cx, cy, cls))
 
