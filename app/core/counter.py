@@ -32,14 +32,20 @@ class ChickenCounter:
 
         # Straddle Tracker parameters
         self.conveyor_speed_px = conveyor_speed_px
-        self.zone_half = zone_half
+        self.zone_half = zone_half  # TODO(Task 3): wire into the straddle test
+        # Per-frame match gate. NOTE: a crossing's seed velocity (conveyor_speed_px)
+        # must be within max_x_distance of the real belt speed or the FIRST match
+        # never forms and the EMA can't bootstrap -> double counts. With the
+        # calibrated seed (~34) this holds; a badly misconfigured seed would not.
         self.max_x_distance = 40
         self.max_straddle_disappeared = 10
 
         # Per-track velocity estimation. Each crossing learns its own px/frame
         # via EMA of observed motion, seeded by conveyor_speed_px.
         self.velocity_ema = 0.3          # weight of newest observation
-        self.max_velocity_px = 120.0     # reject implausible jumps
+        # Reject implausible jumps. ~5x the nominal 34 px/frame at 25 fps;
+        # revisit if camera fps changes (this bound scales with frame rate).
+        self.max_velocity_px = 120.0
 
         # Tracker kept solely for the overlay's #ID labels — no count side-effects.
         self.trackers = {cls: CentroidTracker(max_disappeared, max_distance) for cls in CLASSES}
@@ -111,6 +117,11 @@ class ChickenCounter:
                 frames_elapsed = self.frame_num - c['last_seen_frame']
                 if frames_elapsed > 0:
                     observed_v = (cx - c['last_cx']) / frames_elapsed
+                    # Forward-motion only: the belt runs left->right, so a
+                    # zero/backward observed_v (jitter, or a stopped belt) is
+                    # ignored and the last good velocity is held. Caveat: a real
+                    # belt STOP that outlasts max_straddle_disappeared expires the
+                    # crossing, so a stop-then-restart can re-count that bird.
                     if 0 < observed_v < self.max_velocity_px:
                         c['velocity'] = (self.velocity_ema * observed_v
                                          + (1 - self.velocity_ema) * c['velocity'])
