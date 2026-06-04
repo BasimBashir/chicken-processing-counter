@@ -2,12 +2,13 @@ from app.core.tracker import CentroidTracker
 
 CLASSES = ["empty_shackles", "single_legged", "slaughtered_chicken"]
 
-# Classes that count toward the headline total compared against the BAADER
-# weight counter. Currently empty_shackles + slaughtered_chicken; add
-# "single_legged" here when that class is brought online. Classes left out
-# are still detected, tracked, and shown in the per-class breakdown for
-# diagnostics — they just don't inflate the total.
-COUNTED_CLASSES = ["empty_shackles", "slaughtered_chicken"]
+# Classes summed into the BAADER-comparable bird total (`total_count`).
+# BAADER is a weight sensor, so it never counts an empty shackle — including
+# empty_shackles here would push our total ABOVE BAADER. So the comparable
+# total is slaughtered_chicken only. empty_shackles (and single_legged) are
+# still detected, tracked, and reported as their OWN separate per-class counts
+# in `self.counts` — they're just not summed into the bird total.
+COUNTED_CLASSES = ["slaughtered_chicken"]
 
 
 def _det_to_tuple(d):
