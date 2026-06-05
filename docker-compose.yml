@@ -24,6 +24,8 @@ services:
       - IMGSZ
       - MAX_DISTANCE
       - MAX_DISAPPEARED
+      - CONVEYOR_SPEED_PX
+      - ZONE_HALF
       - RTSP_STREAMS
       - MAX_STREAMS
       - BATCH_MAX
