@@ -15,9 +15,16 @@ os.environ.setdefault(
     "rtsp_transport;tcp|stimeout;5000000|fflags;nobuffer",
 )
 
-# Frozen-frame detection: this many identical consecutive frames means the
-# stream has stalled (camera/encoder hung) and we should reconnect.
-FROZEN_FRAME_LIMIT = 60
+# Frozen-frame detection. A genuinely HUNG connection is already caught by the
+# stimeout above (read() returns ret=False -> reconnect-with-backoff path). This
+# content check is a backstop for the rarer case of a feed that keeps delivering
+# byte-identical frames at full rate (stuck encoder/grabber). Caveat: a static
+# but LIVE scene (idle conveyor under fixed lighting, no sensor noise) can also
+# look identical, so this uses a deliberately high threshold and a FIXED short
+# reconnect delay that does NOT ramp the main backoff — that way an idle period
+# can never delay the first post-idle bird by the 30s read-failure cap.
+FROZEN_FRAME_LIMIT = 150          # ~6s at 25 fps before a stuck feed reconnects
+FROZEN_RECONNECT_DELAY = 2.0      # fixed; independent of read-failure backoff
 
 
 def reconnect_delay(attempt: int, base: float = 1.0, cap: float = 30.0) -> float:
@@ -190,13 +197,14 @@ class VideoProcessor:
                 if sig == last_sig:
                     frozen_count += 1
                     if frozen_count >= FROZEN_FRAME_LIMIT:
+                        # Fixed short delay, and do NOT touch reconnect_attempt:
+                        # a static-but-live scene must not ramp the backoff.
                         cap.release()
                         self.error = "Stream frozen; reconnecting"
                         frozen_count = 0
                         last_sig = None
-                        if self._stop_event.wait(reconnect_delay(reconnect_attempt)):
+                        if self._stop_event.wait(FROZEN_RECONNECT_DELAY):
                             break
-                        reconnect_attempt += 1
                         cap = self._open_capture()
                         continue
                 else:
