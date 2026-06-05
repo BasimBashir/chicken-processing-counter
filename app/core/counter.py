@@ -85,12 +85,16 @@ class ChickenCounter:
             if cls not in self.counts:
                 continue
             
-            # Count when the bbox center falls within the band [roi_x-zone_half, roi_x+zone_half]
+            # Count when the bbox OVERLAPS the band [roi_x-zone_half, roi_x+zone_half].
+            # At zone_half=0 this reduces to the original single-pixel tripwire
+            # (x1 <= roi_x <= x2). Effective catch window = bbox_width + 2*zone_half,
+            # so a wider band tolerates flicker/stutter without the bird being
+            # jumped over (center-point logic would narrow the window instead).
             x1, x2 = d["x1"], d["x2"]
-            cx = (x1 + x2) // 2
             lo = self.roi_x - self.zone_half
             hi = self.roi_x + self.zone_half
-            if lo <= cx <= hi:
+            if x1 <= hi and x2 >= lo:
+                cx = (x1 + x2) // 2
                 cy = (d["y1"] + d["y2"]) // 2
                 straddlers.append((cx, cy, cls))
 
