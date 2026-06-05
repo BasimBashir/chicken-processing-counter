@@ -7,7 +7,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.auth import verify_api_key
 from app.core.counter import CLASSES
@@ -38,8 +38,9 @@ class StreamCreate(BaseModel):
     imgsz: Optional[int] = Field(None, description="Inference image size (multiple of 32)")
     max_distance: Optional[int] = Field(None, description="Tracker max pixel distance")
     max_disappeared: Optional[int] = Field(None, description="Frames before lost track is dropped")
-    zone_half: Optional[int] = Field(None, description="Half-width of counting zone in pixels (zone = roi_x ± zone_half)")
+    zone_half: Optional[int] = Field(None, description="Half-width of counting zone in pixels (zone = roi_x ± zone_half); 0 = single-pixel tripwire")
     appear_margin: Optional[int] = Field(None, description="Max px past zone_left where a brand-new track is still counted")
+    conveyor_speed_px: Optional[float] = Field(None, description="Belt travel per processed frame (px); seeds per-track velocity estimation")
     start_counting: bool = Field(True, description="Begin counting immediately on register")
 
     @field_validator("roi_position", "confidence", "nms_iou", "conf_empty_shackles")
@@ -56,9 +57,95 @@ class StreamCreate(BaseModel):
             raise ValueError("imgsz must be a multiple of 32")
         return v
 
-    @field_validator("max_distance", "max_disappeared", "zone_half", "appear_margin")
+    @field_validator("max_distance", "max_disappeared", "appear_margin")
     @classmethod
     def _positive(cls, v):
+        if v is not None and v < 1:
+            raise ValueError("must be >= 1")
+        return v
+
+    @field_validator("zone_half")
+    @classmethod
+    def _zone_half_range(cls, v):
+        if v is not None and not (0 <= v <= 200):
+            raise ValueError("zone_half must be between 0 and 200")
+        return v
+
+    @field_validator("conveyor_speed_px")
+    @classmethod
+    def _speed_positive(cls, v):
+        if v is not None and v <= 0:
+            raise ValueError("conveyor_speed_px must be > 0")
+        return v
+
+
+class StreamUpdate(BaseModel):
+    """Live-retunable params for an already-running stream (PATCH). All optional;
+    only provided fields are applied. Cannot change the source URL. Unknown
+    fields are rejected so a typo'd PATCH fails loudly instead of silently."""
+    model_config = ConfigDict(extra="forbid")
+
+    roi_position: Optional[float] = Field(
+        None, description="Counting line position as a fraction (0..1) of frame width. "
+        "Higher moves the line right. Place it where chickens are clearly separated.")
+    confidence: Optional[float] = Field(
+        None, description="Min YOLO score to accept single_legged/slaughtered detections. "
+        "Lower catches more (fewer misses) but more false positives; higher is stricter.")
+    conf_empty_shackles: Optional[float] = Field(
+        None, description="Min score for the empty_shackles class only, tuned separately "
+        "from the chicken classes. Lower detects more empty hooks.")
+    nms_iou: Optional[float] = Field(
+        None, description="Agnostic-NMS overlap threshold for merging duplicate boxes. "
+        "Lower = more aggressive merging (risk: a chicken beside a shackle gets suppressed); "
+        "higher keeps adjacent boxes.")
+    imgsz: Optional[int] = Field(
+        None, description="Inference resolution (multiple of 32). Higher = better small-object "
+        "accuracy but slower; the model is trained at 1280.")
+    conveyor_speed_px: Optional[float] = Field(
+        None, description="Belt travel per processed frame (px). Seeds the per-track velocity "
+        "estimator, which then self-tunes from motion. Set near the real belt speed (~34 at "
+        "the 1280-wide sub-stream).")
+    zone_half: Optional[int] = Field(
+        None, description="Half-width (px) of the counting band around the line. Wider tolerates "
+        "bbox flicker / frame stutter so fast birds aren't missed; 0 = single-pixel tripwire.")
+    max_distance: Optional[int] = Field(
+        None, description="OVERLAY ID tracker only (does NOT affect the count): max px an on-screen "
+        "#ID may jump between frames before it's treated as a new object.")
+    max_disappeared: Optional[int] = Field(
+        None, description="OVERLAY ID tracker only (does NOT affect the count): frames an on-screen "
+        "#ID survives without a match before being dropped.")
+
+    @field_validator("roi_position", "confidence", "nms_iou", "conf_empty_shackles")
+    @classmethod
+    def _zero_one(cls, v):
+        if v is not None and not (0.0 < v < 1.0):
+            raise ValueError("must be between 0 and 1 exclusive")
+        return v
+
+    @field_validator("imgsz")
+    @classmethod
+    def _imgsz_mod32(cls, v):
+        if v is not None and v % 32 != 0:
+            raise ValueError("imgsz must be a multiple of 32")
+        return v
+
+    @field_validator("zone_half")
+    @classmethod
+    def _zone_half_range(cls, v):
+        if v is not None and not (0 <= v <= 200):
+            raise ValueError("zone_half must be between 0 and 200")
+        return v
+
+    @field_validator("conveyor_speed_px")
+    @classmethod
+    def _speed_positive(cls, v):
+        if v is not None and v <= 0:
+            raise ValueError("conveyor_speed_px must be > 0")
+        return v
+
+    @field_validator("max_distance", "max_disappeared")
+    @classmethod
+    def _positive_int(cls, v):
         if v is not None and v < 1:
             raise ValueError("must be >= 1")
         return v
@@ -90,6 +177,19 @@ def register_stream(body: StreamCreate):
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return _info_to_dict(info)
+
+
+@router.patch("/{stream_id}")
+def update_stream(stream_id: str, body: StreamUpdate):
+    """Live-retune a running stream's detection/counting params WITHOUT
+    dropping its counts. Only the provided fields change; they take effect on
+    the next processed frame."""
+    proc = _resolve(stream_id)
+    changes = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not changes:
+        return {"status": "no_change", "id": stream_id, "applied": {}}
+    applied = proc.apply_overrides(**changes)
+    return {"status": "updated", "id": stream_id, "applied": applied}
 
 
 @router.delete("/{stream_id}")
@@ -138,7 +238,6 @@ def reset_counts(stream_id: str):
     Useful for shift changes or after recalibrating ROI."""
     proc = _resolve(stream_id)
     proc.counter.reset()
-    proc.counter_alt.reset()
     return {"status": "reset", "id": stream_id,
             "counts": {cls: 0 for cls in CLASSES}}
 

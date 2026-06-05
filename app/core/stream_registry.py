@@ -24,7 +24,7 @@ log = logging.getLogger("stream_registry")
 
 _OVERRIDE_KEYS = {
     "roi_position", "confidence", "conf_empty_shackles", "nms_iou", "imgsz",
-    "max_distance", "max_disappeared",
+    "max_distance", "max_disappeared", "conveyor_speed_px", "zone_half",
 }
 
 
@@ -97,6 +97,8 @@ class StreamRegistry:
                 max_disappeared=cfg["max_disappeared"],
                 max_distance=cfg["max_distance"],
                 conf_empty_shackles=cfg["conf_empty_shackles"],
+                conveyor_speed_px=cfg["conveyor_speed_px"],
+                zone_half=cfg["zone_half"],
                 is_stream=True,
             )
             self._streams[stream_id] = processor
@@ -209,7 +211,7 @@ class StreamRegistry:
     def _merge_overrides(snap: dict, overrides: dict) -> dict:
         cfg = {k: snap[k] for k in (
             "roi_position", "confidence", "conf_empty_shackles", "nms_iou", "imgsz",
-            "max_distance", "max_disappeared",
+            "max_distance", "max_disappeared", "conveyor_speed_px", "zone_half",
         )}
         for k, v in overrides.items():
             if k in cfg and v is not None:

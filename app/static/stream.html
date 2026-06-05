@@ -6,6 +6,16 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <title>Chicken Counter - Live Stream</title>
     <link rel="stylesheet" href="/css/style.css">
+    <style>
+        .setting-help {
+            margin: 2px 0 10px;
+            font-size: 11px;
+            line-height: 1.45;
+            color: var(--text-dim, #9aa0a6);
+            max-width: 760px;
+        }
+        .setting-help em { font-style: italic; opacity: .9; }
+    </style>
 </head>
 <body>
     <nav class="navbar">
@@ -43,7 +53,7 @@
         <div class="stats-panel">
             <div class="stat">
                 <div class="value white" id="totalCount">0</div>
-                <div class="label">Total Counted</div>
+                <div class="label">Birds (vs BAADER)</div>
             </div>
             <div class="stat">
                 <div class="value orange" id="emptyCount">0</div>
@@ -70,17 +80,84 @@
         </div>
 
         <div class="card" style="margin-top:24px;">
-            <h3 style="margin-bottom:16px; font-size:16px;">Settings</h3>
-            <div class="setting-row">
-                <label>ROI Position</label>
-                <input type="range" id="roiSlider" min="0.1" max="0.9" step="0.05" value="0.5">
-                <span class="range-value" id="roiValue">0.50</span>
-            </div>
+            <h3 style="margin-bottom:6px; font-size:16px;">Settings</h3>
+            <p style="margin:0 0 16px; font-size:12px; color:var(--text-dim);">
+                Changes apply to the running stream on the next frame — counts are not reset.
+            </p>
+
+            <h4 style="margin:8px 0 6px; font-size:13px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.04em;">Detection</h4>
+
             <div class="setting-row">
                 <label>Confidence</label>
                 <input type="range" id="confSlider" min="0.1" max="0.9" step="0.05" value="0.25">
                 <span class="range-value" id="confValue">0.25</span>
             </div>
+            <p class="setting-help">Min YOLO score to accept single-legged / slaughtered detections. Lower = catch more birds (fewer misses) but more false positives; higher = stricter.</p>
+
+            <div class="setting-row">
+                <label>Empty-Shackle Conf</label>
+                <input type="range" id="confEmptySlider" min="0.1" max="0.9" step="0.05" value="0.45">
+                <span class="range-value" id="confEmptyValue">0.45</span>
+            </div>
+            <p class="setting-help">Min score for the <em>empty_shackles</em> class only, tuned separately from the chicken classes. Lower detects more empty hooks.</p>
+
+            <div class="setting-row">
+                <label>NMS IoU</label>
+                <input type="range" id="nmsSlider" min="0.1" max="0.9" step="0.05" value="0.45">
+                <span class="range-value" id="nmsValue">0.45</span>
+            </div>
+            <p class="setting-help">Overlap threshold for merging duplicate boxes (agnostic NMS). Lower = more aggressive merging (risk: a chicken next to a shackle gets suppressed); higher keeps adjacent boxes.</p>
+
+            <div class="setting-row">
+                <label>Image Size</label>
+                <select id="imgszSelect" class="input" style="max-width:130px;">
+                    <option value="640">640</option>
+                    <option value="800">800</option>
+                    <option value="960">960</option>
+                    <option value="1280" selected>1280</option>
+                    <option value="1600">1600</option>
+                </select>
+            </div>
+            <p class="setting-help">Inference resolution (multiple of 32). Higher = better small-object accuracy but slower. The model is trained at 1280.</p>
+
+            <h4 style="margin:18px 0 6px; font-size:13px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.04em;">Counting line</h4>
+
+            <div class="setting-row">
+                <label>ROI Position</label>
+                <input type="range" id="roiSlider" min="0.1" max="0.9" step="0.05" value="0.65">
+                <span class="range-value" id="roiValue">0.65</span>
+            </div>
+            <p class="setting-help">Where the vertical counting line sits across the frame (fraction of width). Move it to where chickens are clearly separated.</p>
+
+            <div class="setting-row">
+                <label>Counting Band (±px)</label>
+                <input type="range" id="zoneSlider" min="0" max="60" step="5" value="15">
+                <span class="range-value" id="zoneValue">15</span>
+            </div>
+            <p class="setting-help">Half-width of the band around the line. Wider tolerates bbox flicker / frame stutter so fast birds aren't missed. 0 = single-pixel tripwire.</p>
+
+            <div class="setting-row">
+                <label>Belt Speed (px/frame)</label>
+                <input type="range" id="speedSlider" min="5" max="80" step="1" value="34">
+                <span class="range-value" id="speedValue">34</span>
+            </div>
+            <p class="setting-help">Belt travel per frame in pixels — seeds the per-track velocity estimator (which then self-tunes from motion). Set near your real belt speed (~34 at the 1280 sub-stream).</p>
+
+            <h4 style="margin:18px 0 6px; font-size:13px; color:var(--text-dim); text-transform:uppercase; letter-spacing:.04em;">Overlay labels (no effect on the count)</h4>
+
+            <div class="setting-row">
+                <label>Tracker Max Distance</label>
+                <input type="range" id="maxDistSlider" min="20" max="200" step="5" value="90">
+                <span class="range-value" id="maxDistValue">90</span>
+            </div>
+            <p class="setting-help">Max px an on-screen <em>#ID</em> may jump between frames before it's treated as a new object. Affects the overlay labels only — not the count.</p>
+
+            <div class="setting-row">
+                <label>Tracker Max Disappeared</label>
+                <input type="range" id="maxDisapSlider" min="1" max="30" step="1" value="2">
+                <span class="range-value" id="maxDisapValue">2</span>
+            </div>
+            <p class="setting-help">Frames an on-screen <em>#ID</em> survives without a match before being dropped. Overlay labels only — not the count.</p>
         </div>
     </div>
 

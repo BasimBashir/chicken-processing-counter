@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     # keep up at source FPS, then the tracker thresholds rarely matter.
     rtsp_url: str = ""
     model_path: str = "best.pt"
-    roi_position: float = 0.60
+    roi_position: float = 0.65
     confidence: float = 0.25 #0.30
     conf_empty_shackles: float = 0.45
     # NMS uses agnostic_nms=True (across classes) to avoid double bboxes on
@@ -23,6 +23,14 @@ class Settings(BaseSettings):
     imgsz: int = 1280
     max_distance: int = 90
     max_disappeared: int = 2
+    # Belt travel per processed frame (px), used to seed per-track velocity
+    # estimation in the counter. ~34 px/frame on the 1280-wide sub-stream
+    # (6in shackle pitch, 119cm FOV, ~311 shackles/min). Self-tunes at runtime.
+    conveyor_speed_px: float = 34.0
+    # Half-width (px) of the counting band around roi_x. Band total width =
+    # 2*zone_half. Wider band tolerates bbox flicker / brief frame stutter so
+    # a bird crossing the line is not missed. 0 = single-pixel tripwire.
+    zone_half: int = 15
 
 
     # ── Filesystem ─────────────────────────────────────────────────────────
@@ -34,7 +42,7 @@ class Settings(BaseSettings):
     #   RTSP_STREAMS='[{"id":"line-1","url":"rtsp://cam1/stream"},
     #                  {"id":"line-2","url":"rtsp://cam2/stream","roi_position":0.6}]'
     # Each entry must have id and url. Optional per-stream overrides:
-    # roi_position, confidence, nms_iou, imgsz, max_distance, max_disappeared, zone_half, appear_margin.
+    # roi_position, confidence, nms_iou, imgsz, max_distance, max_disappeared, zone_half, appear_margin, conveyor_speed_px.
     rtsp_streams: str = ""
     max_streams: int = 10
 

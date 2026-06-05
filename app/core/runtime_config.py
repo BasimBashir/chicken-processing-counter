@@ -22,6 +22,8 @@ class RuntimeConfig:
             "imgsz":               boot.imgsz,
             "max_distance":        boot.max_distance,
             "max_disappeared":     boot.max_disappeared,
+            "conveyor_speed_px":   boot.conveyor_speed_px,
+            "zone_half":           boot.zone_half,
             "upload_dir":          boot.upload_dir,
             "output_dir":          boot.output_dir,
             "rtsp_streams":        boot.rtsp_streams,

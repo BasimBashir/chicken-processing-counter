@@ -22,6 +22,7 @@ class ConfigPatch(BaseModel):
     max_disappeared: Optional[int] = None
     zone_half: Optional[int] = None
     appear_margin: Optional[int] = None
+    conveyor_speed_px: Optional[float] = None
 
     @field_validator("roi_position")
     @classmethod
@@ -51,11 +52,27 @@ class ConfigPatch(BaseModel):
             raise ValueError("imgsz must be a multiple of 32")
         return v
 
-    @field_validator("max_distance", "max_disappeared", "zone_half", "appear_margin")
+    @field_validator("max_distance", "max_disappeared", "appear_margin")
     @classmethod
     def positive_int(cls, v):
         if v is not None and v < 1:
             raise ValueError("must be >= 1")
+        return v
+
+    @field_validator("zone_half")
+    @classmethod
+    def zone_half_range(cls, v):
+        # 0 = single-pixel tripwire; cap well above any sane band (~15-50 px)
+        # so a misconfigured value can't turn most of the frame into the zone.
+        if v is not None and not (0 <= v <= 200):
+            raise ValueError("zone_half must be between 0 and 200")
+        return v
+
+    @field_validator("conveyor_speed_px")
+    @classmethod
+    def speed_positive(cls, v):
+        if v is not None and v <= 0:
+            raise ValueError("conveyor_speed_px must be > 0")
         return v
 
 

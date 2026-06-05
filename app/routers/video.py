@@ -38,6 +38,8 @@ async def upload_video(file: UploadFile = File(...)):
         max_disappeared=snap["max_disappeared"],
         max_distance=snap["max_distance"],
         conf_empty_shackles=snap["conf_empty_shackles"],
+        conveyor_speed_px=snap["conveyor_speed_px"],
+        zone_half=snap["zone_half"],
         save_raw_path=raw_output,
         is_stream=False,
     )

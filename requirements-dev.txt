@@ -1,0 +1,5 @@
+# Development / test-only dependencies. Install with:
+#   pip install -r requirements-dev.txt
+# (includes the production deps via -r requirements.txt)
+-r requirements.txt
+pytest
