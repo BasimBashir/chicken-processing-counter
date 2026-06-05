@@ -1,6 +1,7 @@
 .claude
 docs/*
 !docs/superpowers/
+!docs/API.md
 .venv
 __pycache__
 *.pyc
