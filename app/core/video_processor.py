@@ -10,9 +10,12 @@ from app.core.inference_worker import try_submit, QueueFull
 
 # Prefer TCP for RTSP (UDP drops frames silently on congested networks) and
 # disable input buffering for low latency. Set before any VideoCapture opens.
+# Socket timeout is given as BOTH `timeout` (FFmpeg 4+) and `stimeout` (older
+# builds) — whichever the bundled FFmpeg understands wins; the other is ignored.
+# Without it, an unreachable camera falls through to OpenCV's ~30s default.
 os.environ.setdefault(
     "OPENCV_FFMPEG_CAPTURE_OPTIONS",
-    "rtsp_transport;tcp|stimeout;5000000|fflags;nobuffer",
+    "rtsp_transport;tcp|timeout;5000000|stimeout;5000000|fflags;nobuffer",
 )
 
 # Frozen-frame detection. A genuinely HUNG connection is already caught by the
