@@ -76,3 +76,8 @@ def test_streamupdate_allows_zone_zero_and_valid():
     assert m.zone_half == 0
     assert m.conveyor_speed_px == 34.0
     assert m.roi_position == 0.65
+
+
+def test_streamupdate_rejects_unknown_field():
+    with pytest.raises(ValueError):
+        StreamUpdate(zonehalf=20)  # typo: should be zone_half

@@ -7,7 +7,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.core.auth import verify_api_key
 from app.core.counter import CLASSES
@@ -81,7 +81,10 @@ class StreamCreate(BaseModel):
 
 class StreamUpdate(BaseModel):
     """Live-retunable params for an already-running stream (PATCH). All optional;
-    only provided fields are applied. Cannot change the source URL."""
+    only provided fields are applied. Cannot change the source URL. Unknown
+    fields are rejected so a typo'd PATCH fails loudly instead of silently."""
+    model_config = ConfigDict(extra="forbid")
+
     roi_position: Optional[float] = Field(None, description="ROI as fraction 0..1 of frame width")
     confidence: Optional[float] = Field(None, description="YOLO confidence threshold (0..1)")
     conf_empty_shackles: Optional[float] = Field(None, description="Confidence threshold for empty_shackles class")
