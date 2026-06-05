@@ -70,6 +70,9 @@ class VideoProcessor:
         self.is_stream = is_stream
         self.save_raw_path = save_raw_path
         self.dropped_frames = 0
+        # Frame width of the live source, learned once capture opens. Used to
+        # recompute the ROI pixel line when roi_position is retuned live.
+        self.frame_width = 0
 
         self.counter = ChickenCounter(roi_x=roi_x, max_disappeared=max_disappeared,
                                       max_distance=max_distance,
@@ -124,6 +127,44 @@ class VideoProcessor:
     def stop_counting(self):
         self.is_counting = False
 
+    def apply_overrides(self, *, roi_position=None, confidence=None,
+                        conf_empty_shackles=None, nms_iou=None, imgsz=None,
+                        conveyor_speed_px=None, zone_half=None) -> dict:
+        """Live-retune a RUNNING processor without dropping counts. The capture
+        loop reads these attributes each frame, so changes take effect on the
+        next processed frame. Only mutable detection/counting params — not the
+        source URL. Returns the dict of values actually applied."""
+        applied: dict = {}
+        if confidence is not None:
+            self.confidence = confidence
+            self._class_conf["single_legged"] = confidence
+            self._class_conf["slaughtered_chicken"] = confidence
+            applied["confidence"] = confidence
+        if conf_empty_shackles is not None:
+            self._class_conf["empty_shackles"] = conf_empty_shackles
+            applied["conf_empty_shackles"] = conf_empty_shackles
+        if confidence is not None or conf_empty_shackles is not None:
+            # YOLO runs at the lowest class threshold — keep it in sync.
+            self._infer_conf = min(self._class_conf.values())
+        if nms_iou is not None:
+            self.nms_iou = nms_iou
+            applied["nms_iou"] = nms_iou
+        if imgsz is not None:
+            self.imgsz = imgsz
+            applied["imgsz"] = imgsz
+        if conveyor_speed_px is not None:
+            self.counter.conveyor_speed_px = conveyor_speed_px
+            applied["conveyor_speed_px"] = conveyor_speed_px
+        if zone_half is not None:
+            self.counter.zone_half = zone_half
+            applied["zone_half"] = zone_half
+        if roi_position is not None:
+            # Recompute the pixel line from the live frame width if known.
+            if self.frame_width > 0:
+                self.counter.roi_x = int(self.frame_width * roi_position)
+            applied["roi_position"] = roi_position
+        return applied
+
     def get_status(self) -> dict:
         return {
             "is_playing": self.is_playing,
@@ -158,6 +199,7 @@ class VideoProcessor:
         self.fps_source = cap.get(cv2.CAP_PROP_FPS) or 30
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        self.frame_width = width
         self.total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         if self.total_frames <= 0:
             self.is_stream = True

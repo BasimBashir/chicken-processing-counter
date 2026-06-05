@@ -79,6 +79,46 @@ class StreamCreate(BaseModel):
         return v
 
 
+class StreamUpdate(BaseModel):
+    """Live-retunable params for an already-running stream (PATCH). All optional;
+    only provided fields are applied. Cannot change the source URL."""
+    roi_position: Optional[float] = Field(None, description="ROI as fraction 0..1 of frame width")
+    confidence: Optional[float] = Field(None, description="YOLO confidence threshold (0..1)")
+    conf_empty_shackles: Optional[float] = Field(None, description="Confidence threshold for empty_shackles class")
+    nms_iou: Optional[float] = Field(None, description="NMS IoU threshold (0..1)")
+    imgsz: Optional[int] = Field(None, description="Inference image size (multiple of 32)")
+    conveyor_speed_px: Optional[float] = Field(None, description="Belt travel per processed frame (px)")
+    zone_half: Optional[int] = Field(None, description="Half-width of counting band in px; 0 = single-pixel tripwire")
+
+    @field_validator("roi_position", "confidence", "nms_iou", "conf_empty_shackles")
+    @classmethod
+    def _zero_one(cls, v):
+        if v is not None and not (0.0 < v < 1.0):
+            raise ValueError("must be between 0 and 1 exclusive")
+        return v
+
+    @field_validator("imgsz")
+    @classmethod
+    def _imgsz_mod32(cls, v):
+        if v is not None and v % 32 != 0:
+            raise ValueError("imgsz must be a multiple of 32")
+        return v
+
+    @field_validator("zone_half")
+    @classmethod
+    def _zone_half_range(cls, v):
+        if v is not None and not (0 <= v <= 200):
+            raise ValueError("zone_half must be between 0 and 200")
+        return v
+
+    @field_validator("conveyor_speed_px")
+    @classmethod
+    def _speed_positive(cls, v):
+        if v is not None and v <= 0:
+            raise ValueError("conveyor_speed_px must be > 0")
+        return v
+
+
 # ── Endpoints ──────────────────────────────────────────────────────────────
 
 @router.get("")
@@ -105,6 +145,19 @@ def register_stream(body: StreamCreate):
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return _info_to_dict(info)
+
+
+@router.patch("/{stream_id}")
+def update_stream(stream_id: str, body: StreamUpdate):
+    """Live-retune a running stream's detection/counting params WITHOUT
+    dropping its counts. Only the provided fields change; they take effect on
+    the next processed frame."""
+    proc = _resolve(stream_id)
+    changes = {k: v for k, v in body.model_dump().items() if v is not None}
+    if not changes:
+        return {"status": "no_change", "id": stream_id, "applied": {}}
+    applied = proc.apply_overrides(**changes)
+    return {"status": "updated", "id": stream_id, "applied": applied}
 
 
 @router.delete("/{stream_id}")

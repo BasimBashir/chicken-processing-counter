@@ -16,6 +16,17 @@ const roiSlider = document.getElementById("roiSlider");
 const roiValue = document.getElementById("roiValue");
 const confSlider = document.getElementById("confSlider");
 const confValue = document.getElementById("confValue");
+const zoneSlider = document.getElementById("zoneSlider");
+const zoneValue = document.getElementById("zoneValue");
+
+// Live-retune the running "default" stream (best-effort: ignored if no stream).
+function patchLiveStream(body) {
+    fetch("/api/streams/default", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+    }).catch(() => {});
+}
 
 let pollInterval = null;
 
@@ -25,6 +36,10 @@ fetch("/api/config").then(r => r.json()).then(cfg => {
     roiValue.textContent = cfg.roi_position.toFixed(2);
     confSlider.value = cfg.confidence;
     confValue.textContent = cfg.confidence.toFixed(2);
+    if (cfg.zone_half != null) {
+        zoneSlider.value = cfg.zone_half;
+        zoneValue.textContent = cfg.zone_half;
+    }
 });
 
 btnConnect.addEventListener("click", async () => {
@@ -82,22 +97,39 @@ roiSlider.addEventListener("input", () => {
     roiValue.textContent = parseFloat(roiSlider.value).toFixed(2);
 });
 roiSlider.addEventListener("change", () => {
+    const roi_position = parseFloat(roiSlider.value);
     fetch("/api/config", {
-        method: "PUT",
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roi_position: parseFloat(roiSlider.value) }),
+        body: JSON.stringify({ roi_position }),
     });
+    patchLiveStream({ roi_position });  // apply to the running stream now
 });
 
 confSlider.addEventListener("input", () => {
     confValue.textContent = parseFloat(confSlider.value).toFixed(2);
 });
 confSlider.addEventListener("change", () => {
+    const confidence = parseFloat(confSlider.value);
     fetch("/api/config", {
-        method: "PUT",
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confidence: parseFloat(confSlider.value) }),
+        body: JSON.stringify({ confidence }),
     });
+    patchLiveStream({ confidence });
+});
+
+zoneSlider.addEventListener("input", () => {
+    zoneValue.textContent = zoneSlider.value;
+});
+zoneSlider.addEventListener("change", () => {
+    const zone_half = parseInt(zoneSlider.value, 10);
+    fetch("/api/config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ zone_half }),
+    });
+    patchLiveStream({ zone_half });
 });
 
 function setStatus(active, text) {
