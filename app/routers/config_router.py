@@ -61,9 +61,11 @@ class ConfigPatch(BaseModel):
 
     @field_validator("zone_half")
     @classmethod
-    def zone_half_nonneg(cls, v):
-        if v is not None and v < 0:
-            raise ValueError("zone_half must be >= 0")
+    def zone_half_range(cls, v):
+        # 0 = single-pixel tripwire; cap well above any sane band (~15-50 px)
+        # so a misconfigured value can't turn most of the frame into the zone.
+        if v is not None and not (0 <= v <= 200):
+            raise ValueError("zone_half must be between 0 and 200")
         return v
 
     @field_validator("conveyor_speed_px")

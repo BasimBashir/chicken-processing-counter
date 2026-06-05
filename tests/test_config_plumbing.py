@@ -43,3 +43,8 @@ def test_streamcreate_accepts_conveyor_speed_and_zone_zero():
 def test_streamcreate_rejects_nonpositive_conveyor_speed():
     with pytest.raises(ValueError):
         StreamCreate(id="x", url="rtsp://x", conveyor_speed_px=0)
+
+
+def test_streamcreate_rejects_absurd_zone_half():
+    with pytest.raises(ValueError):
+        StreamCreate(id="x", url="rtsp://x", zone_half=500)

@@ -66,9 +66,9 @@ class StreamCreate(BaseModel):
 
     @field_validator("zone_half")
     @classmethod
-    def _zone_half_nonneg(cls, v):
-        if v is not None and v < 0:
-            raise ValueError("zone_half must be >= 0")
+    def _zone_half_range(cls, v):
+        if v is not None and not (0 <= v <= 200):
+            raise ValueError("zone_half must be between 0 and 200")
         return v
 
     @field_validator("conveyor_speed_px")
