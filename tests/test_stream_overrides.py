@@ -78,6 +78,22 @@ def test_streamupdate_allows_zone_zero_and_valid():
     assert m.roi_position == 0.65
 
 
+def test_apply_overrides_tracker_params_live():
+    p = _proc()
+    out = p.apply_overrides(max_distance=120, max_disappeared=5)
+    for t in p.counter.trackers.values():
+        assert t.max_distance == 120
+        assert t.max_disappeared == 5
+    assert out == {"max_distance": 120, "max_disappeared": 5}
+
+
 def test_streamupdate_rejects_unknown_field():
     with pytest.raises(ValueError):
         StreamUpdate(zonehalf=20)  # typo: should be zone_half
+
+
+def test_streamupdate_rejects_nonpositive_tracker_params():
+    with pytest.raises(ValueError):
+        StreamUpdate(max_distance=0)
+    with pytest.raises(ValueError):
+        StreamUpdate(max_disappeared=0)

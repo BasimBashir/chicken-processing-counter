@@ -12,13 +12,6 @@ const emptyCount = document.getElementById("emptyCount");
 const singleCount = document.getElementById("singleCount");
 const slaughteredCount = document.getElementById("slaughteredCount");
 const fpsVal = document.getElementById("fpsVal");
-const roiSlider = document.getElementById("roiSlider");
-const roiValue = document.getElementById("roiValue");
-const confSlider = document.getElementById("confSlider");
-const confValue = document.getElementById("confValue");
-const zoneSlider = document.getElementById("zoneSlider");
-const zoneValue = document.getElementById("zoneValue");
-
 // Live-retune the running "default" stream (best-effort: ignored if no stream).
 function patchLiveStream(body) {
     fetch("/api/streams/default", {
@@ -28,18 +21,55 @@ function patchLiveStream(body) {
     }).catch(() => {});
 }
 
+// Update the config DEFAULT (applies to future streams) and the live stream now.
+function applyParam(key, value) {
+    fetch("/api/config", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ [key]: value }),
+    }).catch(() => {});
+    patchLiveStream({ [key]: value });
+}
+
+const fmt2 = v => Number(v).toFixed(2);
+const fmtInt = v => String(Math.round(Number(v)));
+
+// All live-tunable range controls: slider id -> {config key, value formatter, parser}.
+const RANGE_CONTROLS = [
+    { id: "confSlider",      key: "confidence",          fmt: fmt2,   parse: parseFloat },
+    { id: "confEmptySlider", key: "conf_empty_shackles", fmt: fmt2,   parse: parseFloat },
+    { id: "nmsSlider",       key: "nms_iou",             fmt: fmt2,   parse: parseFloat },
+    { id: "roiSlider",       key: "roi_position",        fmt: fmt2,   parse: parseFloat },
+    { id: "zoneSlider",      key: "zone_half",           fmt: fmtInt, parse: v => parseInt(v, 10) },
+    { id: "speedSlider",     key: "conveyor_speed_px",   fmt: fmtInt, parse: parseFloat },
+    { id: "maxDistSlider",   key: "max_distance",        fmt: fmtInt, parse: v => parseInt(v, 10) },
+    { id: "maxDisapSlider",  key: "max_disappeared",     fmt: fmtInt, parse: v => parseInt(v, 10) },
+];
+
+const imgszSelect = document.getElementById("imgszSelect");
 let pollInterval = null;
+
+RANGE_CONTROLS.forEach(c => {
+    const el = document.getElementById(c.id);
+    if (!el) return;
+    const valEl = document.getElementById(c.id.replace("Slider", "Value"));
+    el.addEventListener("input", () => { if (valEl) valEl.textContent = c.fmt(el.value); });
+    el.addEventListener("change", () => applyParam(c.key, c.parse(el.value)));
+});
+if (imgszSelect) {
+    imgszSelect.addEventListener("change", () => applyParam("imgsz", parseInt(imgszSelect.value, 10)));
+}
 
 fetch("/api/config").then(r => r.json()).then(cfg => {
     if (cfg.rtsp_url) rtspUrl.value = cfg.rtsp_url;
-    roiSlider.value = cfg.roi_position;
-    roiValue.textContent = cfg.roi_position.toFixed(2);
-    confSlider.value = cfg.confidence;
-    confValue.textContent = cfg.confidence.toFixed(2);
-    if (cfg.zone_half != null) {
-        zoneSlider.value = cfg.zone_half;
-        zoneValue.textContent = cfg.zone_half;
-    }
+    RANGE_CONTROLS.forEach(c => {
+        if (cfg[c.key] == null) return;
+        const el = document.getElementById(c.id);
+        const valEl = document.getElementById(c.id.replace("Slider", "Value"));
+        if (el) el.value = cfg[c.key];
+        if (valEl) valEl.textContent = c.fmt(cfg[c.key]);
+    });
+    if (imgszSelect && cfg.imgsz != null) imgszSelect.value = String(cfg.imgsz);
 });
 
 btnConnect.addEventListener("click", async () => {
@@ -91,45 +121,6 @@ btnCountStop.addEventListener("click", async () => {
     await fetch("/api/stream/counting/stop", { method: "POST" });
     btnCountStart.disabled = false;
     btnCountStop.disabled = true;
-});
-
-roiSlider.addEventListener("input", () => {
-    roiValue.textContent = parseFloat(roiSlider.value).toFixed(2);
-});
-roiSlider.addEventListener("change", () => {
-    const roi_position = parseFloat(roiSlider.value);
-    fetch("/api/config", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roi_position }),
-    });
-    patchLiveStream({ roi_position });  // apply to the running stream now
-});
-
-confSlider.addEventListener("input", () => {
-    confValue.textContent = parseFloat(confSlider.value).toFixed(2);
-});
-confSlider.addEventListener("change", () => {
-    const confidence = parseFloat(confSlider.value);
-    fetch("/api/config", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confidence }),
-    });
-    patchLiveStream({ confidence });
-});
-
-zoneSlider.addEventListener("input", () => {
-    zoneValue.textContent = zoneSlider.value;
-});
-zoneSlider.addEventListener("change", () => {
-    const zone_half = parseInt(zoneSlider.value, 10);
-    fetch("/api/config", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ zone_half }),
-    });
-    patchLiveStream({ zone_half });
 });
 
 function setStatus(active, text) {

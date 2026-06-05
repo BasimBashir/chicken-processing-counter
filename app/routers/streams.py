@@ -85,13 +85,35 @@ class StreamUpdate(BaseModel):
     fields are rejected so a typo'd PATCH fails loudly instead of silently."""
     model_config = ConfigDict(extra="forbid")
 
-    roi_position: Optional[float] = Field(None, description="ROI as fraction 0..1 of frame width")
-    confidence: Optional[float] = Field(None, description="YOLO confidence threshold (0..1)")
-    conf_empty_shackles: Optional[float] = Field(None, description="Confidence threshold for empty_shackles class")
-    nms_iou: Optional[float] = Field(None, description="NMS IoU threshold (0..1)")
-    imgsz: Optional[int] = Field(None, description="Inference image size (multiple of 32)")
-    conveyor_speed_px: Optional[float] = Field(None, description="Belt travel per processed frame (px)")
-    zone_half: Optional[int] = Field(None, description="Half-width of counting band in px; 0 = single-pixel tripwire")
+    roi_position: Optional[float] = Field(
+        None, description="Counting line position as a fraction (0..1) of frame width. "
+        "Higher moves the line right. Place it where chickens are clearly separated.")
+    confidence: Optional[float] = Field(
+        None, description="Min YOLO score to accept single_legged/slaughtered detections. "
+        "Lower catches more (fewer misses) but more false positives; higher is stricter.")
+    conf_empty_shackles: Optional[float] = Field(
+        None, description="Min score for the empty_shackles class only, tuned separately "
+        "from the chicken classes. Lower detects more empty hooks.")
+    nms_iou: Optional[float] = Field(
+        None, description="Agnostic-NMS overlap threshold for merging duplicate boxes. "
+        "Lower = more aggressive merging (risk: a chicken beside a shackle gets suppressed); "
+        "higher keeps adjacent boxes.")
+    imgsz: Optional[int] = Field(
+        None, description="Inference resolution (multiple of 32). Higher = better small-object "
+        "accuracy but slower; the model is trained at 1280.")
+    conveyor_speed_px: Optional[float] = Field(
+        None, description="Belt travel per processed frame (px). Seeds the per-track velocity "
+        "estimator, which then self-tunes from motion. Set near the real belt speed (~34 at "
+        "the 1280-wide sub-stream).")
+    zone_half: Optional[int] = Field(
+        None, description="Half-width (px) of the counting band around the line. Wider tolerates "
+        "bbox flicker / frame stutter so fast birds aren't missed; 0 = single-pixel tripwire.")
+    max_distance: Optional[int] = Field(
+        None, description="OVERLAY ID tracker only (does NOT affect the count): max px an on-screen "
+        "#ID may jump between frames before it's treated as a new object.")
+    max_disappeared: Optional[int] = Field(
+        None, description="OVERLAY ID tracker only (does NOT affect the count): frames an on-screen "
+        "#ID survives without a match before being dropped.")
 
     @field_validator("roi_position", "confidence", "nms_iou", "conf_empty_shackles")
     @classmethod
@@ -119,6 +141,13 @@ class StreamUpdate(BaseModel):
     def _speed_positive(cls, v):
         if v is not None and v <= 0:
             raise ValueError("conveyor_speed_px must be > 0")
+        return v
+
+    @field_validator("max_distance", "max_disappeared")
+    @classmethod
+    def _positive_int(cls, v):
+        if v is not None and v < 1:
+            raise ValueError("must be >= 1")
         return v
 
 

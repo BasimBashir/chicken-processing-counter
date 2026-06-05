@@ -129,7 +129,8 @@ class VideoProcessor:
 
     def apply_overrides(self, *, roi_position=None, confidence=None,
                         conf_empty_shackles=None, nms_iou=None, imgsz=None,
-                        conveyor_speed_px=None, zone_half=None) -> dict:
+                        conveyor_speed_px=None, zone_half=None,
+                        max_distance=None, max_disappeared=None) -> dict:
         """Live-retune a RUNNING processor without dropping counts. The capture
         loop reads these attributes each frame, so changes take effect on the
         next processed frame. Only mutable detection/counting params — not the
@@ -158,6 +159,15 @@ class VideoProcessor:
         if zone_half is not None:
             self.counter.zone_half = zone_half
             applied["zone_half"] = zone_half
+        if max_distance is not None:
+            # Overlay ID tracker only (no count side-effects).
+            for t in self.counter.trackers.values():
+                t.max_distance = max_distance
+            applied["max_distance"] = max_distance
+        if max_disappeared is not None:
+            for t in self.counter.trackers.values():
+                t.max_disappeared = max_disappeared
+            applied["max_disappeared"] = max_disappeared
         if roi_position is not None:
             # Recompute the pixel line from the live frame width if known.
             if self.frame_width > 0:
