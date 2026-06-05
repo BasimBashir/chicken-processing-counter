@@ -12,7 +12,7 @@ set -e
 export TRT_CACHE_DIR="${TRT_CACHE_DIR:-/app/engine_cache}"
 export TRT_ENGINE_PATH="${TRT_ENGINE_PATH:-/app/best.engine}"
 export TRT_HALF="${TRT_HALF:-true}"
-export TRT_AUTO_BUILD="${TRT_AUTO_BUILD:-0}"
+export TRT_AUTO_BUILD="${TRT_AUTO_BUILD:-1}"
 
 mkdir -p "$TRT_CACHE_DIR"
 : > /tmp/trt.env

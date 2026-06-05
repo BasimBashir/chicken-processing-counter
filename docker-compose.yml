@@ -32,8 +32,10 @@ services:
       - BATCH_WINDOW_MS
       - INFERENCE_QUEUE_MAX
       - API_KEY
-      # TensorRT auto-build is opt-in (set TRT_AUTO_BUILD=1 to enable).
-      - TRT_AUTO_BUILD=${TRT_AUTO_BUILD:-0}
+      # TensorRT engine auto-build runs on first boot by default (built for the
+      # host GPU and cached to the engine_cache volume; reused on later boots).
+      # Disable with TRT_AUTO_BUILD=0 (falls back to .pt — also CPU-safe).
+      - TRT_AUTO_BUILD=${TRT_AUTO_BUILD:-1}
       - TRT_HALF=${TRT_HALF:-true}
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:5581/health"]
