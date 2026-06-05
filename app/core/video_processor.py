@@ -201,6 +201,7 @@ class VideoProcessor:
                 flash_events=flash_with_frame,
                 roi_x=self.counter.roi_x if self.is_counting else None,
                 frame_num=self.frame_num,
+                zone_half=self.counter.zone_half if self.is_counting else 0,
             )
 
             if self._writer:

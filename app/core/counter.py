@@ -32,7 +32,7 @@ class ChickenCounter:
 
         # Straddle Tracker parameters
         self.conveyor_speed_px = conveyor_speed_px
-        self.zone_half = zone_half  # TODO(Task 3): wire into the straddle test
+        self.zone_half = zone_half
         # Per-frame match gate. NOTE: a crossing's seed velocity (conveyor_speed_px)
         # must be within max_x_distance of the real belt speed or the FIRST match
         # never forms and the EMA can't bootstrap -> double counts. With the
@@ -85,10 +85,12 @@ class ChickenCounter:
             if cls not in self.counts:
                 continue
             
-            # Check if bbox mathematically straddles the roi line
+            # Count when the bbox center falls within the band [roi_x-zone_half, roi_x+zone_half]
             x1, x2 = d["x1"], d["x2"]
-            if x1 <= self.roi_x <= x2:
-                cx = (x1 + x2) // 2
+            cx = (x1 + x2) // 2
+            lo = self.roi_x - self.zone_half
+            hi = self.roi_x + self.zone_half
+            if lo <= cx <= hi:
                 cy = (d["y1"] + d["y2"]) // 2
                 straddlers.append((cx, cy, cls))
 

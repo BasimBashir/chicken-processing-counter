@@ -44,8 +44,13 @@ def draw_rounded_rect(img, pt1, pt2, color, radius=12, thickness=-1, alpha=0.85)
 
 
 
-def draw_roi_line(img, roi_x, height, frame_num):
-    """Draw an animated vertical ROI counting line with rightward arrows."""
+def draw_roi_line(img, roi_x, height, frame_num, zone_half=0):
+    """Draw an animated vertical ROI counting line + translucent band."""
+    if zone_half > 0:
+        overlay = img.copy()
+        cv2.rectangle(overlay, (roi_x - zone_half, 0),
+                      (roi_x + zone_half, height), COLORS["roi_glow"], -1)
+        cv2.addWeighted(overlay, 0.18, img, 0.82, 0, img)
     cv2.line(img, (roi_x, 0), (roi_x, height), COLORS["roi_glow"], 6, cv2.LINE_AA)
     dash_len = 20
     gap_len = 12
@@ -106,7 +111,7 @@ def draw_bbox(img, x1, y1, x2, y2, counted, conf, class_name, obj_id=None):
 
 
 def annotate_detections(frame, detections, objects_by_class,
-                        flash_events, roi_x, frame_num):
+                        flash_events, roi_x, frame_num, zone_half=0):
     """Annotate frame with bboxes (class + ID + confidence), ROI line,
     and crossing flashes. Kept minimal for RTSP production speed.
     """
@@ -129,7 +134,7 @@ def annotate_detections(frame, detections, objects_by_class,
 
     # 2. Vertical ROI line
     if roi_x is not None:
-        draw_roi_line(annotated, roi_x, height, frame_num)
+        draw_roi_line(annotated, roi_x, height, frame_num, zone_half)
 
     # 2. Crossing flashes — (fx, fy, cls, f_start)
     active_flashes = []
