@@ -8,6 +8,28 @@ from app.core.counter import ChickenCounter, CLASSES
 from app.core.annotator import annotate_detections
 from app.core.inference_worker import try_submit, QueueFull
 
+# Prefer TCP for RTSP (UDP drops frames silently on congested networks) and
+# disable input buffering for low latency. Set before any VideoCapture opens.
+os.environ.setdefault(
+    "OPENCV_FFMPEG_CAPTURE_OPTIONS",
+    "rtsp_transport;tcp|stimeout;5000000|fflags;nobuffer",
+)
+
+# Frozen-frame detection: this many identical consecutive frames means the
+# stream has stalled (camera/encoder hung) and we should reconnect.
+FROZEN_FRAME_LIMIT = 60
+
+
+def reconnect_delay(attempt: int, base: float = 1.0, cap: float = 30.0) -> float:
+    """Exponential backoff (seconds) for stream reconnection, capped."""
+    return min(cap, base * (2 ** max(0, attempt)))
+
+
+def frame_signature(frame) -> int:
+    """Cheap signature of a frame for frozen-stream detection. Coarse
+    subsample keeps it O(1)-ish regardless of resolution."""
+    return int(frame[::32, ::32].sum())
+
 
 class VideoProcessor:
     """Background video/stream processor with independent play/count controls."""
@@ -107,8 +129,17 @@ class VideoProcessor:
             "error": self.error,
         }
 
-    def _run(self):
+    def _open_capture(self):
         cap = cv2.VideoCapture(self.source)
+        if self.is_stream:
+            try:
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # keep only newest frame
+            except Exception:
+                pass
+        return cap
+
+    def _run(self):
+        cap = self._open_capture()
         if not cap.isOpened():
             self.error = f"Could not open: {self.source}"
             self.is_playing = False
@@ -133,6 +164,9 @@ class VideoProcessor:
         fps_timer = time.time()
         fps_frame_count = 0
         frame_delay = 1.0 / self.fps_source if not self.is_stream else 0
+        reconnect_attempt = 0
+        last_sig = None
+        frozen_count = 0
 
         while not self._stop_event.is_set():
             frame_start = time.time()
@@ -140,9 +174,39 @@ class VideoProcessor:
             if not ret:
                 if not self.is_stream:
                     self.is_complete = True
+                    break
+                # Live stream dropped — reconnect with backoff, keep counts.
+                cap.release()
+                delay = reconnect_delay(reconnect_attempt)
+                self.error = f"Stream lost; reconnecting in {delay:.0f}s"
+                reconnect_attempt += 1
+                if self._stop_event.wait(delay):
+                    break
+                cap = self._open_capture()
+                continue
+
+            if self.is_stream:
+                sig = frame_signature(frame)
+                if sig == last_sig:
+                    frozen_count += 1
+                    if frozen_count >= FROZEN_FRAME_LIMIT:
+                        cap.release()
+                        self.error = "Stream frozen; reconnecting"
+                        frozen_count = 0
+                        last_sig = None
+                        if self._stop_event.wait(reconnect_delay(reconnect_attempt)):
+                            break
+                        reconnect_attempt += 1
+                        cap = self._open_capture()
+                        continue
                 else:
-                    self.error = "Stream connection lost"
-                break
+                    frozen_count = 0
+                    last_sig = sig
+
+            # Healthy frame — reset backoff + transient error.
+            if reconnect_attempt or self.error:
+                reconnect_attempt = 0
+                self.error = None
 
             self.frame_num += 1
             fps_frame_count += 1
