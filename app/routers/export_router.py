@@ -11,7 +11,10 @@ router = APIRouter(prefix="/api/export", tags=["export"],
 
 class ExportRequest(BaseModel):
     half: bool = True
-    imgsz: int = 1280   # model training size; imgsz left runtime config
+    # Build the engine at the size ObjectCounter actually infers at (ultralytics
+    # default 640 = the 640x480 sub-stream's native size). Raise for a hi-res
+    # main stream. Must match TRT_IMGSZ used by docker-entrypoint.sh.
+    imgsz: int = 640
 
 
 @router.post("/tensorrt")

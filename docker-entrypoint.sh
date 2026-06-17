@@ -22,8 +22,12 @@ if [ "$TRT_AUTO_BUILD" = "1" ]; then
 import os, sys, hashlib, shutil
 from pathlib import Path
 
-# Pull imgsz / model_path from Settings so the engine and uvicorn always agree.
-# Settings reads env vars when set, otherwise the defaults in app/config.py.
+# Pull model_path from Settings so the engine and uvicorn agree on the weights.
+# imgsz is NO LONGER a Settings field (counting is fixed to ObjectCounter, which
+# infers at the ultralytics default of 640 — matching the 640x480 sub-stream).
+# The engine is built at TRT_IMGSZ (default 640) so the .engine's fixed input
+# shape matches what ObjectCounter feeds it. Override with TRT_IMGSZ if you run
+# a higher-resolution main stream.
 from app.config import Settings
 s = Settings()
 
@@ -31,7 +35,7 @@ src_pt = s.model_path if s.model_path.endswith(".pt") else "best.pt"
 model_pt    = Path(src_pt if Path(src_pt).is_absolute() else f"/app/{src_pt}")
 engine_dir  = Path(os.environ["TRT_CACHE_DIR"])
 engine_link = Path(os.environ["TRT_ENGINE_PATH"])
-imgsz       = int(s.imgsz)
+imgsz       = int(os.environ.get("TRT_IMGSZ", "640"))
 half        = os.environ.get("TRT_HALF", "true").lower() == "true"
 env_file    = Path("/tmp/trt.env")
 
