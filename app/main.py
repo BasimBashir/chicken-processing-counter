@@ -6,7 +6,6 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 
 from app.core.auth import log_auth_state
-from app.core.inference_worker import start_worker, stop_worker
 from app.core.model_cache import preload_model
 from app.core.runtime_config import runtime_config
 from app.core.stream_registry import registry
@@ -28,12 +27,6 @@ async def lifespan(app: FastAPI):
     os.makedirs(snap["output_dir"], exist_ok=True)
 
     preload_model(snap["model_path"])
-    start_worker(
-        model_path=snap["model_path"],
-        batch_max=snap["batch_max"],
-        batch_window_ms=snap["batch_window_ms"],
-        queue_max=snap["inference_queue_max"],
-    )
     log_auth_state()
     registry.start_all_from_env()
 
@@ -41,7 +34,6 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         registry.stop_all()
-        stop_worker()
 
 
 app = FastAPI(
@@ -50,9 +42,8 @@ app = FastAPI(
     description=(
         "3-class chicken counting API for left-to-right conveyor belts. "
         "Classes: empty_shackles, single_legged, slaughtered_chicken. "
-        "Vertical ROI line — objects counted as they cross left to right. "
-        "Multi-stream RTSP support with batched GPU inference. "
-        "All inference parameters tunable at runtime via PATCH /api/config."
+        "Counting via ultralytics ObjectCounter on a vertical center line — "
+        "objects counted as they cross left to right. Multi-stream RTSP support."
     ),
     lifespan=lifespan,
 )

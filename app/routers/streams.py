@@ -1,260 +1,37 @@
-"""Multi-stream RTSP API. Each stream is identified by a user-supplied id
-and runs in its own VideoProcessor thread. Inference funnels through the
-shared batched InferenceWorker so adding streams scales sub-linearly with GPU.
-"""
+"""Multi-stream RTSP API. Each stream runs in its own VideoProcessor thread with
+its own ObjectCounter."""
 import time
-from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, Field
 
 from app.core.auth import verify_api_key
-from app.core.counter import CLASSES
+from app.core.classes import CLASSES
 from app.core.stream_registry import (
-    registry,
-    StreamCapacityError,
-    StreamExistsError,
-    StreamNotFoundError,
+    registry, StreamCapacityError, StreamExistsError, StreamNotFoundError,
 )
 from app.core.video_processor import VideoProcessor
 
-router = APIRouter(
-    prefix="/api/streams",
-    tags=["streams"],
-    dependencies=[Depends(verify_api_key)],
-)
+router = APIRouter(prefix="/api/streams", tags=["streams"],
+                   dependencies=[Depends(verify_api_key)])
 
-
-# ── Request / response schemas ─────────────────────────────────────────────
 
 class StreamCreate(BaseModel):
     id: str = Field(..., description="Unique identifier for this stream")
     url: str = Field(..., description="RTSP/HTTP URL of the source feed")
-    roi_position: Optional[float] = Field(None, description="ROI as fraction 0..1 of frame width")
-    confidence: Optional[float] = Field(None, description="YOLO confidence threshold (0..1)")
-    conf_empty_shackles: Optional[float] = Field(None, description="Confidence threshold for empty_shackles class only (overrides global confidence)")
-    nms_iou: Optional[float] = Field(None, description="NMS IoU threshold (0..1)")
-    imgsz: Optional[int] = Field(None, description="Inference image size (multiple of 32)")
-    max_distance: Optional[int] = Field(None, description="Tracker max pixel distance")
-    max_disappeared: Optional[int] = Field(None, description="Frames before lost track is dropped")
-    zone_half: Optional[int] = Field(None, description="Half-width of counting zone in pixels (zone = roi_x ± zone_half); 0 = single-pixel tripwire")
-    appear_margin: Optional[int] = Field(None, description="Max px past zone_left where a brand-new track is still counted")
-    conveyor_speed_px: Optional[float] = Field(None, description="Belt travel per processed frame (px); seeds per-track velocity estimation")
-    sway_k: Optional[float] = Field(None, description="Sway tolerance as a fraction of learned belt speed (0..2); absorbs sway/slow/stop. Default 0.6")
-    stop_motion_thresh: Optional[float] = Field(None, description="Belt-stop detection threshold (mean frame pixel-change); below it counting freezes. 0 disables. Default 0.4")
-    stop_run_frames: Optional[int] = Field(None, description="Frames of low motion required before belt is considered stopped (default 42 = 1.4s at 30fps). Raise to prevent false stops on long inter-bird gaps.")
-    stop_resume_thresh: Optional[float] = Field(None, description="Motion level that must be exceeded for 2 frames before belt_stopped clears (default 2.82). Creates hysteresis so slow belt restarts don't prematurely unblock new crossings.")
-    zone_speed_factor: Optional[float] = Field(None, description="Adaptive zone multiplier: effective_zone_half = max(zone_half, belt_speed * factor). Widens the ROI catch band at high belt speed (default 1.20).")
     start_counting: bool = Field(True, description="Begin counting immediately on register")
 
-    @field_validator("roi_position", "confidence", "nms_iou", "conf_empty_shackles")
-    @classmethod
-    def _zero_one(cls, v):
-        if v is not None and not (0.0 < v < 1.0):
-            raise ValueError("must be between 0 and 1 exclusive")
-        return v
-
-    @field_validator("imgsz")
-    @classmethod
-    def _imgsz_mod32(cls, v):
-        if v is not None and v % 32 != 0:
-            raise ValueError("imgsz must be a multiple of 32")
-        return v
-
-    @field_validator("max_distance", "max_disappeared", "appear_margin")
-    @classmethod
-    def _positive(cls, v):
-        if v is not None and v < 1:
-            raise ValueError("must be >= 1")
-        return v
-
-    @field_validator("zone_half")
-    @classmethod
-    def _zone_half_range(cls, v):
-        if v is not None and not (0 <= v <= 200):
-            raise ValueError("zone_half must be between 0 and 200")
-        return v
-
-    @field_validator("conveyor_speed_px")
-    @classmethod
-    def _speed_positive(cls, v):
-        if v is not None and v <= 0:
-            raise ValueError("conveyor_speed_px must be > 0")
-        return v
-
-    @field_validator("sway_k")
-    @classmethod
-    def _sway_k_range(cls, v):
-        if v is not None and not (0.0 <= v <= 2.0):
-            raise ValueError("sway_k must be between 0 and 2")
-        return v
-
-    @field_validator("stop_motion_thresh")
-    @classmethod
-    def _stop_thresh_nonneg(cls, v):
-        if v is not None and v < 0:
-            raise ValueError("stop_motion_thresh must be >= 0")
-        return v
-
-    @field_validator("stop_run_frames")
-    @classmethod
-    def _stop_run_frames_positive(cls, v):
-        if v is not None and v < 1:
-            raise ValueError("stop_run_frames must be >= 1")
-        return v
-
-    @field_validator("stop_resume_thresh")
-    @classmethod
-    def _stop_resume_nonneg(cls, v):
-        if v is not None and v < 0:
-            raise ValueError("stop_resume_thresh must be >= 0")
-        return v
-
-    @field_validator("zone_speed_factor")
-    @classmethod
-    def _zone_speed_factor_nonneg(cls, v):
-        if v is not None and v < 0:
-            raise ValueError("zone_speed_factor must be >= 0")
-        return v
-
-
-class StreamUpdate(BaseModel):
-    """Live-retunable params for an already-running stream (PATCH). All optional;
-    only provided fields are applied. Cannot change the source URL. Unknown
-    fields are rejected so a typo'd PATCH fails loudly instead of silently."""
-    model_config = ConfigDict(extra="forbid")
-
-    roi_position: Optional[float] = Field(
-        None, description="Counting line position as a fraction (0..1) of frame width. "
-        "Higher moves the line right. Place it where chickens are clearly separated.")
-    confidence: Optional[float] = Field(
-        None, description="Min YOLO score to accept single_legged/slaughtered detections. "
-        "Lower catches more (fewer misses) but more false positives; higher is stricter.")
-    conf_empty_shackles: Optional[float] = Field(
-        None, description="Min score for the empty_shackles class only, tuned separately "
-        "from the chicken classes. Lower detects more empty hooks.")
-    nms_iou: Optional[float] = Field(
-        None, description="Agnostic-NMS overlap threshold for merging duplicate boxes. "
-        "Lower = more aggressive merging (risk: a chicken beside a shackle gets suppressed); "
-        "higher keeps adjacent boxes.")
-    imgsz: Optional[int] = Field(
-        None, description="Inference resolution (multiple of 32). Higher = better small-object "
-        "accuracy but slower; the model is trained at 1280.")
-    conveyor_speed_px: Optional[float] = Field(
-        None, description="Belt travel per processed frame (px). Seeds the per-track velocity "
-        "estimator, which then self-tunes from motion. Set near the real belt speed (~34 at "
-        "the 1280-wide sub-stream).")
-    sway_k: Optional[float] = Field(
-        None, description="Sway tolerance as a fraction of the learned belt speed (0..2). "
-        "Absorbs carcass sway / slow-downs / stops without double counting. Default 0.6.")
-    stop_motion_thresh: Optional[float] = Field(
-        None, description="Belt-stop detection threshold (mean frame-to-frame pixel change). "
-        "When motion stays below it, counting freezes so a parked flickering bird isn't "
-        "re-counted. Raise if a slow belt is mis-read as stopped; 0 disables. Default 0.4.")
-    stop_run_frames: Optional[int] = Field(None, description="Frames of low motion required before belt is considered stopped (default 42 = 1.4s at 30fps). Raise to prevent false stops on long inter-bird gaps.")
-    stop_resume_thresh: Optional[float] = Field(None, description="Motion level that must be exceeded for 2 frames before belt_stopped clears (default 2.82). Creates hysteresis so slow belt restarts don't prematurely unblock new crossings.")
-    zone_speed_factor: Optional[float] = Field(None, description="Adaptive zone multiplier: effective_zone_half = max(zone_half, belt_speed * factor). Widens the ROI catch band at high belt speed (default 1.20).")
-    zone_half: Optional[int] = Field(
-        None, description="Half-width (px) of the counting band around the line. Wider tolerates "
-        "bbox flicker / frame stutter so fast birds aren't missed; 0 = single-pixel tripwire.")
-    max_distance: Optional[int] = Field(
-        None, description="OVERLAY ID tracker only (does NOT affect the count): max px an on-screen "
-        "#ID may jump between frames before it's treated as a new object.")
-    max_disappeared: Optional[int] = Field(
-        None, description="OVERLAY ID tracker only (does NOT affect the count): frames an on-screen "
-        "#ID survives without a match before being dropped.")
-
-    @field_validator("roi_position", "confidence", "nms_iou", "conf_empty_shackles")
-    @classmethod
-    def _zero_one(cls, v):
-        if v is not None and not (0.0 < v < 1.0):
-            raise ValueError("must be between 0 and 1 exclusive")
-        return v
-
-    @field_validator("imgsz")
-    @classmethod
-    def _imgsz_mod32(cls, v):
-        if v is not None and v % 32 != 0:
-            raise ValueError("imgsz must be a multiple of 32")
-        return v
-
-    @field_validator("zone_half")
-    @classmethod
-    def _zone_half_range(cls, v):
-        if v is not None and not (0 <= v <= 200):
-            raise ValueError("zone_half must be between 0 and 200")
-        return v
-
-    @field_validator("conveyor_speed_px")
-    @classmethod
-    def _speed_positive(cls, v):
-        if v is not None and v <= 0:
-            raise ValueError("conveyor_speed_px must be > 0")
-        return v
-
-    @field_validator("max_distance", "max_disappeared")
-    @classmethod
-    def _positive_int(cls, v):
-        if v is not None and v < 1:
-            raise ValueError("must be >= 1")
-        return v
-
-    @field_validator("sway_k")
-    @classmethod
-    def _sway_k_range(cls, v):
-        if v is not None and not (0.0 <= v <= 2.0):
-            raise ValueError("sway_k must be between 0 and 2")
-        return v
-
-    @field_validator("stop_motion_thresh")
-    @classmethod
-    def _stop_thresh_nonneg(cls, v):
-        if v is not None and v < 0:
-            raise ValueError("stop_motion_thresh must be >= 0")
-        return v
-
-    @field_validator("stop_run_frames")
-    @classmethod
-    def _stop_run_frames_positive(cls, v):
-        if v is not None and v < 1:
-            raise ValueError("stop_run_frames must be >= 1")
-        return v
-
-    @field_validator("stop_resume_thresh")
-    @classmethod
-    def _stop_resume_nonneg(cls, v):
-        if v is not None and v < 0:
-            raise ValueError("stop_resume_thresh must be >= 0")
-        return v
-
-    @field_validator("zone_speed_factor")
-    @classmethod
-    def _zone_speed_factor_nonneg(cls, v):
-        if v is not None and v < 0:
-            raise ValueError("zone_speed_factor must be >= 0")
-        return v
-
-
-# ── Endpoints ──────────────────────────────────────────────────────────────
 
 @router.get("")
 def list_streams():
-    """List all registered streams with each one's own counts and status."""
     return {"streams": [_info_to_dict(i) for i in registry.list()]}
 
 
 @router.post("", status_code=201)
 def register_stream(body: StreamCreate):
-    """Register and start a new RTSP stream. Inference begins immediately;
-    if start_counting is true (default), the counter is also armed."""
-    overrides = {
-        k: v for k, v in body.model_dump(exclude={"id", "url", "start_counting"}).items()
-        if v is not None
-    }
     try:
-        info = registry.register(body.id, body.url, overrides,
-                                 start_counting=body.start_counting)
+        info = registry.register(body.id, body.url, start_counting=body.start_counting)
     except StreamExistsError as exc:
         raise HTTPException(status_code=409, detail=str(exc))
     except StreamCapacityError as exc:
@@ -264,22 +41,8 @@ def register_stream(body: StreamCreate):
     return _info_to_dict(info)
 
 
-@router.patch("/{stream_id}")
-def update_stream(stream_id: str, body: StreamUpdate):
-    """Live-retune a running stream's detection/counting params WITHOUT
-    dropping its counts. Only the provided fields change; they take effect on
-    the next processed frame."""
-    proc = _resolve(stream_id)
-    changes = {k: v for k, v in body.model_dump().items() if v is not None}
-    if not changes:
-        return {"status": "no_change", "id": stream_id, "applied": {}}
-    applied = proc.apply_overrides(**changes)
-    return {"status": "updated", "id": stream_id, "applied": applied}
-
-
 @router.delete("/{stream_id}")
 def unregister_stream(stream_id: str):
-    """Stop a stream's capture thread and drop it from the registry."""
     try:
         registry.unregister(stream_id)
     except StreamNotFoundError as exc:
@@ -289,45 +52,33 @@ def unregister_stream(stream_id: str):
 
 @router.get("/{stream_id}/status")
 def stream_status(stream_id: str):
-    """Per-stream status: counts, fps, dropped_frames, error, is_counting."""
     return _info_to_dict(_resolve(stream_id, info=True))
 
 
 @router.get("/{stream_id}/feed")
 def stream_feed(stream_id: str):
-    """MJPEG feed of the annotated frame from this stream only."""
     proc = _resolve(stream_id)
-    return StreamingResponse(
-        _mjpeg_generator(proc),
-        media_type="multipart/x-mixed-replace; boundary=frame",
-    )
+    return StreamingResponse(_mjpeg_generator(proc),
+                             media_type="multipart/x-mixed-replace; boundary=frame")
 
 
 @router.post("/{stream_id}/counting/start")
 def start_counting(stream_id: str):
-    proc = _resolve(stream_id)
-    proc.start_counting()
+    _resolve(stream_id).start_counting()
     return {"status": "counting", "id": stream_id}
 
 
 @router.post("/{stream_id}/counting/stop")
 def stop_counting(stream_id: str):
-    proc = _resolve(stream_id)
-    proc.stop_counting()
+    _resolve(stream_id).stop_counting()
     return {"status": "not_counting", "id": stream_id}
 
 
 @router.post("/{stream_id}/counting/reset")
 def reset_counts(stream_id: str):
-    """Zero out this stream's counts without disrupting capture.
-    Useful for shift changes or after recalibrating ROI."""
-    proc = _resolve(stream_id)
-    proc.counter.reset()
-    return {"status": "reset", "id": stream_id,
-            "counts": {cls: 0 for cls in CLASSES}}
+    _resolve(stream_id).reset_counts()
+    return {"status": "reset", "id": stream_id, "counts": {cls: 0 for cls in CLASSES}}
 
-
-# ── Helpers ────────────────────────────────────────────────────────────────
 
 def _resolve(stream_id: str, info: bool = False):
     try:
@@ -343,9 +94,7 @@ def _info_to_dict(info) -> dict:
         "is_playing": info.is_playing,
         "is_counting": info.is_counting,
         "counts": info.counts,
-        "total_count": info.total_count,
         "fps": info.fps,
-        "dropped_frames": info.dropped_frames,
         "error": info.error,
     }
 
@@ -354,10 +103,5 @@ def _mjpeg_generator(proc: VideoProcessor):
     while proc.is_playing:
         frame_bytes = proc.latest_frame
         if frame_bytes:
-            yield (
-                b"--frame\r\n"
-                b"Content-Type: image/jpeg\r\n\r\n"
-                + frame_bytes
-                + b"\r\n"
-            )
+            yield (b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + frame_bytes + b"\r\n")
         time.sleep(0.03)

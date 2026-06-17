@@ -11,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.core.auth import verify_api_key
-from app.core.counter import CLASSES
+from app.core.classes import CLASSES
 from app.core.runtime_config import runtime_config
 from app.core.stream_registry import (
     registry,
@@ -90,7 +90,6 @@ def stream_status():
             "is_connected": False,
             "is_counting": False,
             "counts": {cls: 0 for cls in CLASSES},
-            "total_count": 0,
             "fps": 0,
         }
     info = registry.info(_DEFAULT_ID)
@@ -98,7 +97,6 @@ def stream_status():
         "is_connected": info.is_playing,
         "is_counting": info.is_counting,
         "counts": info.counts,
-        "total_count": info.total_count,
         "fps": info.fps,
         "error": info.error,
     }

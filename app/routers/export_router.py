@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from app.core.auth import verify_api_key
-from app.core.exporter import exporter, ExportState
+from app.core.exporter import exporter
 from app.core.runtime_config import runtime_config
 
 router = APIRouter(prefix="/api/export", tags=["export"],
@@ -11,6 +11,7 @@ router = APIRouter(prefix="/api/export", tags=["export"],
 
 class ExportRequest(BaseModel):
     half: bool = True
+    imgsz: int = 1280   # model training size; imgsz left runtime config
 
 
 @router.post("/tensorrt")
@@ -18,7 +19,7 @@ def start_export(body: ExportRequest = ExportRequest()):
     snap = runtime_config.snapshot()
     started = exporter.start(
         model_path=snap["model_path"],
-        imgsz=snap["imgsz"],
+        imgsz=body.imgsz,
         half=body.half,
     )
     if not started:
