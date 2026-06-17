@@ -140,3 +140,36 @@ def test_slow_restart_ramp_stays_stopped_until_above_resume_thresh():
     motion = [0.05] * 60 + [1.5] * 10
     states = _simulate_belt_state(motion, stop_run_frames=42)
     assert all(states[42:]), "Slow-start ramp below resume_thresh must keep belt_stopped=True"
+
+
+from app.routers.streams import StreamCreate, StreamUpdate
+
+
+def test_stream_create_accepts_new_params():
+    sc = StreamCreate(id="x", url="rtsp://x",
+                      stop_run_frames=50, stop_resume_thresh=3.0,
+                      zone_speed_factor=1.5)
+    assert sc.stop_run_frames == 50
+    assert sc.stop_resume_thresh == 3.0
+    assert sc.zone_speed_factor == 1.5
+
+
+def test_stream_update_accepts_new_params():
+    su = StreamUpdate(stop_run_frames=60, stop_resume_thresh=2.5,
+                      zone_speed_factor=1.0)
+    assert su.stop_run_frames == 60
+
+
+def test_stream_update_rejects_negative_stop_run_frames():
+    with pytest.raises(ValueError):
+        StreamUpdate(stop_run_frames=0)
+
+
+def test_stream_update_rejects_negative_resume_thresh():
+    with pytest.raises(ValueError):
+        StreamUpdate(stop_resume_thresh=-0.1)
+
+
+def test_stream_update_rejects_negative_zone_speed_factor():
+    with pytest.raises(ValueError):
+        StreamUpdate(zone_speed_factor=-1.0)

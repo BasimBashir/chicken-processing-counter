@@ -24,7 +24,8 @@ log = logging.getLogger("stream_registry")
 
 _OVERRIDE_KEYS = {
     "roi_position", "confidence", "conf_empty_shackles", "nms_iou", "imgsz",
-    "max_distance", "max_disappeared", "conveyor_speed_px", "zone_half",
+    "max_distance", "max_disappeared", "conveyor_speed_px", "zone_half", "sway_k",
+    "stop_motion_thresh", "stop_run_frames", "stop_resume_thresh", "zone_speed_factor",
 }
 
 
@@ -86,7 +87,11 @@ class StreamRegistry:
                     f"Stream cap reached ({cap}). Remove a stream or raise MAX_STREAMS."
                 )
 
-            roi_x = self._resolve_roi_x(url, cfg["roi_position"])
+            # Frames are resized to the fixed processing resolution, so the ROI
+            # line is computed in that pixel space (no stream-width probe needed).
+            proc_w = int(snap["proc_width"])
+            proc_h = int(snap["proc_height"])
+            roi_x = int(proc_w * cfg["roi_position"])
             processor = VideoProcessor(
                 source=url,
                 model=get_model(snap["model_path"]),
@@ -99,6 +104,13 @@ class StreamRegistry:
                 conf_empty_shackles=cfg["conf_empty_shackles"],
                 conveyor_speed_px=cfg["conveyor_speed_px"],
                 zone_half=cfg["zone_half"],
+                sway_k=cfg["sway_k"],
+                stop_motion_thresh=cfg["stop_motion_thresh"],
+                stop_run_frames=cfg["stop_run_frames"],
+                stop_resume_thresh=cfg["stop_resume_thresh"],
+                zone_speed_factor=cfg["zone_speed_factor"],
+                proc_width=proc_w,
+                proc_height=proc_h,
                 is_stream=True,
             )
             self._streams[stream_id] = processor
@@ -211,7 +223,8 @@ class StreamRegistry:
     def _merge_overrides(snap: dict, overrides: dict) -> dict:
         cfg = {k: snap[k] for k in (
             "roi_position", "confidence", "conf_empty_shackles", "nms_iou", "imgsz",
-            "max_distance", "max_disappeared", "conveyor_speed_px", "zone_half",
+            "max_distance", "max_disappeared", "conveyor_speed_px", "zone_half", "sway_k",
+            "stop_motion_thresh", "stop_run_frames", "stop_resume_thresh", "zone_speed_factor",
         )}
         for k, v in overrides.items():
             if k in cfg and v is not None:

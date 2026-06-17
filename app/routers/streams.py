@@ -41,6 +41,11 @@ class StreamCreate(BaseModel):
     zone_half: Optional[int] = Field(None, description="Half-width of counting zone in pixels (zone = roi_x ± zone_half); 0 = single-pixel tripwire")
     appear_margin: Optional[int] = Field(None, description="Max px past zone_left where a brand-new track is still counted")
     conveyor_speed_px: Optional[float] = Field(None, description="Belt travel per processed frame (px); seeds per-track velocity estimation")
+    sway_k: Optional[float] = Field(None, description="Sway tolerance as a fraction of learned belt speed (0..2); absorbs sway/slow/stop. Default 0.6")
+    stop_motion_thresh: Optional[float] = Field(None, description="Belt-stop detection threshold (mean frame pixel-change); below it counting freezes. 0 disables. Default 0.4")
+    stop_run_frames: Optional[int] = Field(None, description="Frames of low motion required before belt is considered stopped (default 42 = 1.4s at 30fps). Raise to prevent false stops on long inter-bird gaps.")
+    stop_resume_thresh: Optional[float] = Field(None, description="Motion level that must be exceeded for 2 frames before belt_stopped clears (default 2.82). Creates hysteresis so slow belt restarts don't prematurely unblock new crossings.")
+    zone_speed_factor: Optional[float] = Field(None, description="Adaptive zone multiplier: effective_zone_half = max(zone_half, belt_speed * factor). Widens the ROI catch band at high belt speed (default 1.20).")
     start_counting: bool = Field(True, description="Begin counting immediately on register")
 
     @field_validator("roi_position", "confidence", "nms_iou", "conf_empty_shackles")
@@ -78,6 +83,41 @@ class StreamCreate(BaseModel):
             raise ValueError("conveyor_speed_px must be > 0")
         return v
 
+    @field_validator("sway_k")
+    @classmethod
+    def _sway_k_range(cls, v):
+        if v is not None and not (0.0 <= v <= 2.0):
+            raise ValueError("sway_k must be between 0 and 2")
+        return v
+
+    @field_validator("stop_motion_thresh")
+    @classmethod
+    def _stop_thresh_nonneg(cls, v):
+        if v is not None and v < 0:
+            raise ValueError("stop_motion_thresh must be >= 0")
+        return v
+
+    @field_validator("stop_run_frames")
+    @classmethod
+    def _stop_run_frames_positive(cls, v):
+        if v is not None and v < 1:
+            raise ValueError("stop_run_frames must be >= 1")
+        return v
+
+    @field_validator("stop_resume_thresh")
+    @classmethod
+    def _stop_resume_nonneg(cls, v):
+        if v is not None and v < 0:
+            raise ValueError("stop_resume_thresh must be >= 0")
+        return v
+
+    @field_validator("zone_speed_factor")
+    @classmethod
+    def _zone_speed_factor_nonneg(cls, v):
+        if v is not None and v < 0:
+            raise ValueError("zone_speed_factor must be >= 0")
+        return v
+
 
 class StreamUpdate(BaseModel):
     """Live-retunable params for an already-running stream (PATCH). All optional;
@@ -105,6 +145,16 @@ class StreamUpdate(BaseModel):
         None, description="Belt travel per processed frame (px). Seeds the per-track velocity "
         "estimator, which then self-tunes from motion. Set near the real belt speed (~34 at "
         "the 1280-wide sub-stream).")
+    sway_k: Optional[float] = Field(
+        None, description="Sway tolerance as a fraction of the learned belt speed (0..2). "
+        "Absorbs carcass sway / slow-downs / stops without double counting. Default 0.6.")
+    stop_motion_thresh: Optional[float] = Field(
+        None, description="Belt-stop detection threshold (mean frame-to-frame pixel change). "
+        "When motion stays below it, counting freezes so a parked flickering bird isn't "
+        "re-counted. Raise if a slow belt is mis-read as stopped; 0 disables. Default 0.4.")
+    stop_run_frames: Optional[int] = Field(None, description="Frames of low motion required before belt is considered stopped (default 42 = 1.4s at 30fps). Raise to prevent false stops on long inter-bird gaps.")
+    stop_resume_thresh: Optional[float] = Field(None, description="Motion level that must be exceeded for 2 frames before belt_stopped clears (default 2.82). Creates hysteresis so slow belt restarts don't prematurely unblock new crossings.")
+    zone_speed_factor: Optional[float] = Field(None, description="Adaptive zone multiplier: effective_zone_half = max(zone_half, belt_speed * factor). Widens the ROI catch band at high belt speed (default 1.20).")
     zone_half: Optional[int] = Field(
         None, description="Half-width (px) of the counting band around the line. Wider tolerates "
         "bbox flicker / frame stutter so fast birds aren't missed; 0 = single-pixel tripwire.")
@@ -148,6 +198,41 @@ class StreamUpdate(BaseModel):
     def _positive_int(cls, v):
         if v is not None and v < 1:
             raise ValueError("must be >= 1")
+        return v
+
+    @field_validator("sway_k")
+    @classmethod
+    def _sway_k_range(cls, v):
+        if v is not None and not (0.0 <= v <= 2.0):
+            raise ValueError("sway_k must be between 0 and 2")
+        return v
+
+    @field_validator("stop_motion_thresh")
+    @classmethod
+    def _stop_thresh_nonneg(cls, v):
+        if v is not None and v < 0:
+            raise ValueError("stop_motion_thresh must be >= 0")
+        return v
+
+    @field_validator("stop_run_frames")
+    @classmethod
+    def _stop_run_frames_positive(cls, v):
+        if v is not None and v < 1:
+            raise ValueError("stop_run_frames must be >= 1")
+        return v
+
+    @field_validator("stop_resume_thresh")
+    @classmethod
+    def _stop_resume_nonneg(cls, v):
+        if v is not None and v < 0:
+            raise ValueError("stop_resume_thresh must be >= 0")
+        return v
+
+    @field_validator("zone_speed_factor")
+    @classmethod
+    def _zone_speed_factor_nonneg(cls, v):
+        if v is not None and v < 0:
+            raise ValueError("zone_speed_factor must be >= 0")
         return v
 
 
