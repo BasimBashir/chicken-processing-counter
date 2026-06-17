@@ -220,6 +220,7 @@ class VideoProcessor:
             "is_complete": self.is_complete,
             "is_stream": self.is_stream,
             "belt_stopped": self.belt_stopped,
+            "stop_motion_thresh":  self.stop_motion_thresh,
             "stop_run_frames":    self.stop_run_frames,
             "stop_resume_thresh": self.stop_resume_thresh,
             "dropped_frames": self.dropped_frames,
@@ -291,7 +292,7 @@ class VideoProcessor:
                 frame = cv2.resize(frame, (self.proc_width, self.proc_height))
 
             # Belt-stop detection from raw-frame motion (cheap downscaled diff).
-            # 4 consecutive near-zero-motion frames -> belt considered stopped.
+            # stop_run_frames consecutive near-zero-motion frames -> belt considered stopped.
             _g = cv2.cvtColor(cv2.resize(frame, (160, 90)), cv2.COLOR_BGR2GRAY)
             if self._prev_motion_gray is not None:
                 _motion = float(cv2.absdiff(_g, self._prev_motion_gray).mean())
