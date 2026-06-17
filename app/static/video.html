@@ -17,7 +17,7 @@
 
     <div class="container">
         <h1 class="page-title">Video Processing</h1>
-        <p class="page-subtitle">Upload a video to detect, track, and count chickens crossing the vertical ROI line (left-to-right conveyor)</p>
+        <p class="page-subtitle">Upload a video to detect, track, and count chickens crossing the vertical counting line (left-to-right conveyor)</p>
 
         <div class="card" id="uploadCard">
             <div class="upload-zone" id="uploadZone">
@@ -47,10 +47,6 @@
 
             <div class="stats-panel">
                 <div class="stat">
-                    <div class="value white" id="totalCount">0</div>
-                    <div class="label">Total Counted</div>
-                </div>
-                <div class="stat">
                     <div class="value orange" id="emptyCount">0</div>
                     <div class="label">Empty Shackles</div>
                 </div>
@@ -79,11 +75,11 @@
             </div>
 
             <div class="controls" style="margin-top: 20px;">
-                <a class="btn btn-primary" id="downloadBtn" style="display:none;" download>Download Output (H.264)</a>
+                <a class="btn btn-primary" id="downloadBtn" style="display:none;">Download Annotated Video</a>
             </div>
         </div>
     </div>
 
-    <script src="/js/video.js"></script>
+    <script src="/js/video.js?v=3"></script>
 </body>
 </html>

@@ -11,7 +11,6 @@ const feedImg = document.getElementById("feedImg");
 const feedPlaceholder = document.getElementById("feedPlaceholder");
 const statusDot = document.getElementById("statusDot");
 const statusLabel = document.getElementById("statusLabel");
-const totalCount = document.getElementById("totalCount");
 const emptyCount = document.getElementById("emptyCount");
 const singleCount = document.getElementById("singleCount");
 const slaughteredCount = document.getElementById("slaughteredCount");
@@ -36,7 +35,6 @@ async function handleUpload(file) {
     uploadZone.querySelector(".label").textContent = "Uploading...";
     const formData = new FormData();
     formData.append("file", file);
-
     try {
         const resp = await fetch("/api/video/upload", { method: "POST", body: formData });
         const data = await resp.json();
@@ -95,16 +93,11 @@ function startPolling() {
             const resp = await fetch(`/api/video/${sessionId}/status`);
             const s = resp.ok ? await resp.json() : null;
             if (!s) return;
-
-            totalCount.textContent = s.total_count;
             emptyCount.textContent = s.counts?.empty_shackles ?? 0;
             singleCount.textContent = s.counts?.single_legged ?? 0;
             slaughteredCount.textContent = s.counts?.slaughtered_chicken ?? 0;
-            frameNum.textContent = s.total_frames > 0
-                ? `${s.frame_num}/${s.total_frames}`
-                : s.frame_num;
+            frameNum.textContent = s.total_frames > 0 ? `${s.frame_num}/${s.total_frames}` : s.frame_num;
             fpsVal.textContent = s.fps;
-
             if (s.is_complete) {
                 setStatus(false, "Complete");
                 btnPlay.disabled = false;
