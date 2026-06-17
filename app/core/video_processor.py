@@ -51,7 +51,7 @@ class VideoProcessor:
                  conveyor_speed_px: float = 34.0, zone_half: int = 15,
                  sway_k: float = 0.6, stop_motion_thresh: float = 0.4,
                  stop_run_frames: int = 42,
-                 stop_resume_thresh: float = 2.82,
+                 stop_resume_thresh: float = 2.82, zone_speed_factor: float = 1.20,
                  proc_width: int = 1280, proc_height: int = 720,
                  save_raw_path: str = None, is_stream: bool = False):
         self.source = source
@@ -88,6 +88,7 @@ class VideoProcessor:
         self.stop_motion_thresh = float(stop_motion_thresh)
         self.stop_run_frames = int(stop_run_frames)
         self.stop_resume_thresh = float(stop_resume_thresh)
+        self.zone_speed_factor = float(zone_speed_factor)
         self._prev_motion_gray = None
         self._stop_run = 0
         self._resume_run = 0
@@ -96,7 +97,8 @@ class VideoProcessor:
         self.counter = ChickenCounter(roi_x=roi_x, max_disappeared=max_disappeared,
                                       max_distance=max_distance,
                                       conveyor_speed_px=conveyor_speed_px,
-                                      zone_half=zone_half, sway_k=sway_k)
+                                      zone_half=zone_half, sway_k=sway_k,
+                                      zone_speed_factor=zone_speed_factor)
 
         self.is_playing = False
         self.is_counting = False
@@ -151,7 +153,8 @@ class VideoProcessor:
                         conveyor_speed_px=None, zone_half=None,
                         max_distance=None, max_disappeared=None,
                         sway_k=None, stop_motion_thresh=None,
-                        stop_run_frames=None, stop_resume_thresh=None) -> dict:
+                        stop_run_frames=None, stop_resume_thresh=None,
+                        zone_speed_factor=None) -> dict:
         """Live-retune a RUNNING processor without dropping counts. The capture
         loop reads these attributes each frame, so changes take effect on the
         next processed frame. Only mutable detection/counting params — not the
@@ -183,6 +186,9 @@ class VideoProcessor:
         if sway_k is not None:
             self.counter.sway_k = sway_k
             applied["sway_k"] = sway_k
+        if zone_speed_factor is not None:
+            self.counter.zone_speed_factor = float(zone_speed_factor)
+            applied["zone_speed_factor"] = zone_speed_factor
         if stop_motion_thresh is not None:
             self.stop_motion_thresh = stop_motion_thresh
             applied["stop_motion_thresh"] = stop_motion_thresh
