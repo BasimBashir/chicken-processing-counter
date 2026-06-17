@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     rtsp_url: str = ""
     model_path: str = "best.pt"
     roi_position: float = 0.65
-    confidence: float = 0.25 #0.30
+    confidence: float = 0.35 #0.30
     conf_empty_shackles: float = 0.45
     # NMS uses agnostic_nms=True (across classes) to avoid double bboxes on
     # the same object. The IoU threshold here controls how aggressive that is:
@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     nms_iou: float = 0.45
     imgsz: int = 1280
     max_distance: int = 90
-    max_disappeared: int = 2
+    max_disappeared: int = 20 #2
     # Belt travel per processed frame (px), used to seed per-track velocity
     # estimation in the counter. ~34 px/frame on the 1280-wide sub-stream
     # (6in shackle pitch, 119cm FOV, ~311 shackles/min). Self-tunes at runtime.
@@ -30,7 +30,41 @@ class Settings(BaseSettings):
     # Half-width (px) of the counting band around roi_x. Band total width =
     # 2*zone_half. Wider band tolerates bbox flicker / brief frame stutter so
     # a bird crossing the line is not missed. 0 = single-pixel tripwire.
-    zone_half: int = 15
+    zone_half: int = 18
+    # Sway tolerance as a FRACTION of each crossing's learned belt speed. A
+    # straddler re-matches its crossing if within sway_k*velocity of its last
+    # position — absorbs carcass sway / slow-downs / stops without double
+    # counting. Speed- and resolution-independent (paired with the fixed
+    # processing resolution below). 0.6 tuned on-site; 0 disables.
+    sway_k: float = 0.6
+    # Belt-stop detection: if the mean abs frame-to-frame pixel change stays
+    # below this for a few frames, the belt is treated as stopped and counting
+    # is frozen (no new crossings / no expiry) so a parked, flickering bird is
+    # not re-counted. Raise if a slow belt is wrongly seen as stopped; lower if
+    # a true stop isn't detected. 0 disables the freeze.
+    stop_motion_thresh: float = 0.4
+    # Number of consecutive frames motion must stay below stop_motion_thresh
+    # before belt_stopped is set True. Default 42 frames = 1.4s at 30fps —
+    # safely above the measured max inter-bird gap of 27 frames (0.9s) so
+    # normal gaps between hanging chickens never trigger a false belt stop.
+    stop_run_frames: int = 42
+    # Motion level (same units as stop_motion_thresh) that must be exceeded
+    # for 2 consecutive frames before belt_stopped is cleared. Large dead-band
+    # (default ~7× stop_motion_thresh) prevents slow belt restart from
+    # prematurely unblocking new crossings.
+    stop_resume_thresh: float = 2.82
+    # Adaptive zone multiplier: effective_zone_half = max(zone_half,
+    # belt_speed_px * zone_speed_factor). Widens the ROI catch band
+    # proportionally to how fast the belt is moving so fast birds still
+    # spend at least 1 frame inside the zone.
+    zone_speed_factor: float = 1.20
+
+    # ── Fixed processing resolution ────────────────────────────────────────
+    # Every incoming frame (any stream/video, any resolution) is resized to
+    # this before inference + counting, so the pixel thresholds above always
+    # apply in the same regime. Match the model's training resolution.
+    proc_width: int = 1280
+    proc_height: int = 720
 
 
     # ── Filesystem ─────────────────────────────────────────────────────────
