@@ -19,6 +19,19 @@ def test_annotate_boxes_handles_missing_optional_fields():
     assert out.shape == frame.shape
 
 
+def test_annotate_boxes_draws_region_line():
+    from app.core.annotator import REGION_COLOR
+    frame = np.zeros((200, 320, 3), dtype=np.uint8)
+    region = [(160, 0), (160, 200)]   # vertical center line
+    out = annotate_boxes(frame, [], region_pts=region, region_thickness=4)
+    # The line column should carry ObjectCounter's region color somewhere.
+    col = out[:, 158:163, :]
+    assert (col == np.array(REGION_COLOR, dtype=np.uint8)).all(axis=2).any()
+    # No region -> no line drawn (frame stays blank with empty boxes).
+    blank = annotate_boxes(frame, [])
+    assert blank.sum() == 0
+
+
 def test_annotate_image_detections_still_returns_counts():
     frame = np.zeros((200, 320, 3), dtype=np.uint8)
     det = [{"x1": 5, "y1": 5, "x2": 50, "y2": 60,

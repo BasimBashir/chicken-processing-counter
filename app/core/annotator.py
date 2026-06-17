@@ -1,4 +1,5 @@
 import cv2
+import numpy as np
 
 COLORS = {
     "panel_bg":  (20, 20, 20),
@@ -6,6 +7,11 @@ COLORS = {
     "white":     (255, 255, 255),
     "dim":       (160, 160, 160),
 }
+
+# BGR color ultralytics ObjectCounter uses for the counting region/line
+# (solutions.SolutionAnnotator.draw_region default). Replicated here so the
+# line on our frames is 100% the same as test.py's plot_im line.
+REGION_COLOR = (104, 0, 123)
 
 # Per-class colors in BGR (unchanged from the previous annotator).
 CLASS_COLORS = {
@@ -60,15 +66,21 @@ def draw_bbox(img, x1, y1, x2, y2, counted, conf, class_name, obj_id=None):
                 cv2.FONT_HERSHEY_SIMPLEX, 0.32, (0, 0, 0), 1, cv2.LINE_AA)
 
 
-def annotate_boxes(frame, boxes):
-    """Bbox-only annotation. `boxes` is a list of dicts with keys
-    x1,y1,x2,y2,class_name and optional conf,obj_id. No ROI line, no HUD."""
+def annotate_boxes(frame, boxes, region_pts=None, region_thickness=4):
+    """Bbox-only annotation plus the counting line. `boxes` is a list of dicts
+    with keys x1,y1,x2,y2,class_name and optional conf,obj_id. `region_pts`, if
+    given, is the ObjectCounter region (e.g. [(x,0),(x,h)]) drawn as the counting
+    line in ObjectCounter's own color — same line as test.py. No in/out HUD."""
     annotated = frame.copy()
     for b in boxes:
         draw_bbox(annotated, int(b["x1"]), int(b["y1"]), int(b["x2"]), int(b["y2"]),
                   counted=False, conf=float(b.get("conf", 0.0)),
                   class_name=b.get("class_name", "slaughtered_chicken"),
                   obj_id=b.get("obj_id"))
+    if region_pts is not None and len(region_pts) >= 2:
+        pts = np.array(region_pts, dtype=np.int32)
+        cv2.polylines(annotated, [pts], isClosed=False, color=REGION_COLOR,
+                      thickness=int(region_thickness), lineType=cv2.LINE_AA)
     return annotated
 
 

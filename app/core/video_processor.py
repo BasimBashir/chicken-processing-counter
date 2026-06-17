@@ -84,6 +84,8 @@ class VideoProcessor:
         self._counts = {c: 0 for c in CLASSES}
         self._counter = None          # solutions.ObjectCounter, built on first frame
         self._frame_dims = None       # (w, h) of the source
+        self._line_points = None      # counting line [(x,0),(x,h)] for the overlay
+        self._line_thickness = 4      # matches ObjectCounter's region thickness
         self._reset_requested = False
 
         self._latest_frame = None
@@ -152,9 +154,15 @@ class VideoProcessor:
     def _build_counter(self, w: int, h: int):
         # Vertical line at the horizontal center — left->right flow (per test.py).
         line_points = [(w // 2, 0), (w // 2, h)]
-        return solutions.ObjectCounter(
+        self._line_points = line_points
+        counter = solutions.ObjectCounter(
             model=self.model_path, region=line_points, show=False, verbose=False,
         )
+        # Match ObjectCounter's own region thickness (line_width * 2) so the line
+        # we draw is identical to test.py's plot_im line.
+        lw = int(getattr(counter, "line_width", 2) or 2)
+        self._line_thickness = max(2, lw * 2)
+        return counter
 
     def _run(self):
         cap = self._open_capture()
@@ -235,7 +243,13 @@ class VideoProcessor:
                 self._counter = self._build_counter(*self._frame_dims)
                 self._reset_requested = False
 
+            # ObjectCounter.process() draws its OWN boxes/labels/region line/counts
+            # onto `frame` IN PLACE (ultralytics' Annotator wraps the input array).
+            # Snapshot a pristine copy BEFORE processing and annotate that, so only
+            # our bbox-only overlay shows — never ObjectCounter's default drawing.
+            annotate_src = frame
             if self.is_counting:
+                annotate_src = frame.copy()
                 try:
                     results = self._counter.process(frame)
                 except Exception as exc:
@@ -253,7 +267,9 @@ class VideoProcessor:
                 boxes = [{"x1": d["x1"], "y1": d["y1"], "x2": d["x2"], "y2": d["y2"],
                           "class_name": d["class_name"], "conf": d["conf"]} for d in det]
 
-            annotated = annotate_boxes(frame, boxes)
+            annotated = annotate_boxes(annotate_src, boxes,
+                                       region_pts=self._line_points,
+                                       region_thickness=self._line_thickness)
 
             if self._writer:
                 self._writer.write(annotated)
