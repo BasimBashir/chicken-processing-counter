@@ -11,7 +11,7 @@ def test_conveyor_speed_default_is_belt_calibrated():
 
 
 def test_zone_half_default():
-    assert Settings().zone_half == 15
+    assert Settings().zone_half == 18
 
 
 def test_runtime_config_exposes_new_keys():
