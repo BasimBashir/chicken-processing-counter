@@ -4,7 +4,6 @@ torchvision
 opencv-python-headless
 numpy
 pillow
-scipy
 ultralytics
 pandas
 tqdm
@@ -18,4 +17,7 @@ python-dotenv
 onnx>=1.12.0,<2.0.0
 onnxslim>=0.1.71
 onnxruntime-gpu
-tensorrt
+# Pin <11: TensorRT 11.0 removed the weak-typing BuilderFlag family
+# (BuilderFlag.FP16/INT8). Ultralytics 8.4.x's engine exporter still calls
+# config.set_flag(trt.BuilderFlag.FP16), which AttributeErrors on TRT 11.
+tensorrt>=10.0,<11
