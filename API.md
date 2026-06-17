@@ -36,36 +36,81 @@ Per‑class colors (BGR): `empty_shackles` = orange, `single_legged` = gold, `sl
 
 ## 2. How to run it
 
-### A. Local (development) — uvicorn
+The published image on Docker Hub is **`basim123/chicken-counter:latest`** — it already
+contains the app and the `best.pt` weights, so you don't need the source to run it.
+
+### A. Run the published image (recommended) — Docker Hub
 
 ```bash
-# from the repo root, with a Python env that has the deps installed
-uvicorn app.main:app --host 0.0.0.0 --port 5581
-# add --reload during development to auto-restart on code changes
+docker pull basim123/chicken-counter:latest
 ```
 
-`best.pt` must be in the working directory (project root). With a CUDA GPU the model
-runs on the GPU automatically; otherwise it falls back to CPU.
+**GPU + automatic TensorRT (recommended):**
+```bash
+docker run -d --name chicken-counter --gpus all -p 5581:5581 \
+  -v engine_cache:/app/engine_cache \
+  basim123/chicken-counter:latest
+```
 
-### B. Docker (recommended for deployment) — CPU
+**CPU only (no GPU / no TensorRT):**
+```bash
+docker run -d --name chicken-counter -p 5581:5581 \
+  -e TRT_AUTO_BUILD=0 \
+  basim123/chicken-counter:latest
+```
+
+**With config / streams / auth and persisted output:**
+```bash
+docker run -d --name chicken-counter --gpus all -p 5581:5581 \
+  -e API_KEY=my-secret \
+  -e RTSP_STREAMS='[{"id":"line-1","url":"rtsp://user:pass@cam:554/Streaming/Channels/102"}]' \
+  -e TRT_IMGSZ=640 \
+  -v engine_cache:/app/engine_cache \
+  -v "$(pwd)/outputs:/app/app/outputs" \
+  basim123/chicken-counter:latest
+```
+
+To run your **own** weights instead of the baked‑in `best.pt`, mount the file and point
+`MODEL_PATH` at it: `-v /path/to/best.pt:/app/best.pt -e MODEL_PATH=best.pt`.
+
+Check it's up: `curl http://localhost:5581/health`. Logs: `docker logs -f chicken-counter`.
+
+> On the first GPU boot the container **auto‑builds the TensorRT engine** (2–6 min on an
+> RTX 3090) before it's ready — the engine is cached to the `engine_cache` volume and
+> reused on later boots. See §3.
+
+### B. Run with docker compose (uses the same published image)
+
+The repo's `docker-compose.yml` references `basim123/chicken-counter:latest`. To pull and
+run it (CPU), or add the GPU override:
 
 ```bash
-docker compose up -d --build
-# API on http://localhost:5581 ; health: curl http://localhost:5581/health
+docker compose pull && docker compose up -d                                   # CPU
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --pull always  # GPU
 docker compose down
 ```
 
-### C. Docker + NVIDIA GPU (+ automatic TensorRT)
+It mounts `app/uploads`, `app/outputs`, and the `engine_cache` volume, and reads env
+(`RTSP_URL`, `MODEL_PATH`, `RTSP_STREAMS`, `MAX_STREAMS`, `API_KEY`, `TRT_*`) from your
+shell or a `.env` file.
+
+### C. Build from source (contributors)
 
 ```bash
-docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build
+docker compose up -d --build                                                  # CPU
+docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --build  # GPU
+# publish a new image:
+docker build -t basim123/chicken-counter:latest . && docker push basim123/chicken-counter:latest
 ```
 
-The GPU compose file adds the NVIDIA device reservation. On first GPU boot the
-container **auto‑builds a TensorRT engine** (see §3).
+### D. Local (development) — uvicorn
 
-> First GPU boot builds the TRT engine (2–6 min on an RTX 3090) before `/health`
-> goes green — the healthcheck `start_period` allows for this.
+```bash
+# from the repo root, with a Python env that has the deps installed
+uvicorn app.main:app --host 0.0.0.0 --port 5581   # add --reload during development
+```
+`best.pt` must be in the working directory. With a CUDA GPU the model runs on GPU
+automatically; otherwise it falls back to CPU. (TensorRT is Docker‑only.)
 
 ---
 
