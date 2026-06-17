@@ -57,3 +57,22 @@ def test_adaptive_zone_disabled_when_no_active_crossings():
     # A bird well inside even static zone — must count regardless
     c.update([_det(300)])
     assert c.counts["slaughtered_chicken"] == 1
+
+
+def test_adaptive_zone_widens_at_high_speed():
+    """Bird outside static zone_half=18 must be caught when adaptive zone is on,
+    and missed when zone_speed_factor=0 disables it."""
+    # Adaptive ON: conveyor_speed_px=50, factor=1.20 → effective_zone_half=60
+    # zone = [500-60, 500+60] = [440, 560]
+    # Bird at cx=440 (x1=400, x2=480): outside static [482,518], inside adaptive [440,560]
+    c_on = ChickenCounter(roi_x=500, conveyor_speed_px=50, zone_half=18,
+                          sway_k=0.0, zone_speed_factor=1.20)
+    c_on.update([_det(440)])
+    assert c_on.counts["slaughtered_chicken"] == 1, "Adaptive zone must catch marginal bird"
+
+    # Adaptive OFF: same geometry but factor=0 → effective_zone_half=max(18,0)=18
+    # zone = [482, 518]; bird at cx=440 is outside → missed
+    c_off = ChickenCounter(roi_x=500, conveyor_speed_px=50, zone_half=18,
+                           sway_k=0.0, zone_speed_factor=0.0)
+    c_off.update([_det(440)])
+    assert c_off.counts["slaughtered_chicken"] == 0, "Static zone must miss marginal bird"

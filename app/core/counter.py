@@ -129,7 +129,6 @@ class ChickenCounter:
                 cy = (d["y1"] + d["y2"]) // 2
                 straddlers.append((cx, cy, cls))
 
-        matched_crossings: set[int] = set()
         matched_straddlers: set[int] = set()
 
         if straddlers and self.active_crossings:
@@ -164,7 +163,6 @@ class ChickenCounter:
                                          + (1 - self.velocity_ema) * c['velocity'])
                 c['last_cx'] = cx
                 c['last_seen_frame'] = self.frame_num
-                matched_crossings.add(j)
                 matched_straddlers.add(i)
 
         # New crossings for unmatched straddlers
