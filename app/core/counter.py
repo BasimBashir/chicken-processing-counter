@@ -1,3 +1,6 @@
+import numpy as np
+from scipy.optimize import linear_sum_assignment
+
 from app.core.tracker import CentroidTracker
 
 CLASSES = ["empty_shackles", "single_legged", "slaughtered_chicken"]
@@ -27,12 +30,22 @@ class ChickenCounter:
 
     def __init__(self, roi_x: int, max_disappeared: int = 15,
                  max_distance: int = 55, conveyor_speed_px: float = 34.0,
-                 zone_half: int = 15):
+                 zone_half: int = 18, sway_k: float = 0.6,
+                 zone_speed_factor: float = 1.20):
         self.roi_x = roi_x
 
         # Straddle Tracker parameters
         self.conveyor_speed_px = conveyor_speed_px
         self.zone_half = zone_half
+        # Sway tolerance, RELATIVE to the crossing's learned belt speed: a
+        # straddler also matches a crossing if it is within `sway_k * velocity`
+        # of that crossing's LAST position (not just its forward prediction).
+        # This absorbs carcass sway / belt slow-downs / full stops without
+        # spawning a duplicate, and because it scales with the belt speed it is
+        # resolution- AND speed-independent (k~0.6 from on-site tuning). Set 0
+        # to disable (pure forward-prediction matching).
+        self.sway_k = sway_k
+        self.zone_speed_factor = zone_speed_factor
         # Per-frame match gate. NOTE: a crossing's seed velocity (conveyor_speed_px)
         # must be within max_x_distance of the real belt speed or the FIRST match
         # never forms and the EMA can't bootstrap -> double counts. With the
@@ -61,9 +74,16 @@ class ChickenCounter:
     def total_count(self) -> int:
         return sum(self.counts[c] for c in COUNTED_CLASSES)
 
-    def update(self, det_info: list[dict]) -> dict:
+    def update(self, det_info: list[dict], belt_stopped: bool = False) -> dict:
         """Process detections for one frame. Returns {class_name: {obj_id: (cx, cy)}}
         from the debug tracker for annotating IDs on video.
+
+        `belt_stopped`: when the conveyor isn't moving, no bird can newly cross
+        the line, so we (a) do NOT create new crossings and (b) do NOT expire
+        existing ones. This stops a parked bird whose detection FLICKERS from
+        being re-counted each time its box reappears (the crossing stays alive
+        and re-matches it via the sway tolerance). Physically safe: nothing is
+        crossing a stopped line, so no real count can be missed.
         """
         self.frame_num += 1
 
@@ -79,63 +99,79 @@ class ChickenCounter:
             all_objects[cls] = dict(self.trackers[cls].update(by_class[cls]))
 
         # 2) Straddle Tracker Logic (Virtual Tripwire)
+
+        # Adaptive zone: widen proportionally to measured belt speed.
+        # When zone_half=0 the caller has explicitly requested single-pixel
+        # tripwire mode; respect that and skip the adaptive expansion.
+        _vels = [c['velocity'] for c in self.active_crossings]
+        belt_speed_px = (sum(_vels) / len(_vels)) if _vels else self.conveyor_speed_px
+        if self.zone_half > 0:
+            effective_zone_half = max(self.zone_half, int(belt_speed_px * self.zone_speed_factor))
+        else:
+            effective_zone_half = 0
+
         straddlers = []
         for d in det_info:
             cls = d.get("class_name", "slaughtered_chicken")
             if cls not in self.counts:
                 continue
-            
+
             # Count when the bbox OVERLAPS the band [roi_x-zone_half, roi_x+zone_half].
             # At zone_half=0 this reduces to the original single-pixel tripwire
             # (x1 <= roi_x <= x2). Effective catch window = bbox_width + 2*zone_half,
             # so a wider band tolerates flicker/stutter without the bird being
             # jumped over (center-point logic would narrow the window instead).
             x1, x2 = d["x1"], d["x2"]
-            lo = self.roi_x - self.zone_half
-            hi = self.roi_x + self.zone_half
+            lo = self.roi_x - effective_zone_half
+            hi = self.roi_x + effective_zone_half
             if x1 <= hi and x2 >= lo:
                 cx = (x1 + x2) // 2
                 cy = (d["y1"] + d["y2"]) // 2
                 straddlers.append((cx, cy, cls))
 
-        matched_crossings = set()
+        matched_crossings: set[int] = set()
+        matched_straddlers: set[int] = set()
 
-        for cx, cy, cls in straddlers:
-            best_match_idx = -1
-            best_dist = float('inf')
+        if straddlers and self.active_crossings:
+            INF = 1e9
+            n_s = len(straddlers)
+            n_c = len(self.active_crossings)
+            C = np.full((n_s, n_c), INF)
 
-            # Try to match to an active crossing
-            for i, crossing in enumerate(self.active_crossings):
-                if crossing['cls'] != cls or i in matched_crossings:
+            for i, (cx, cy, cls) in enumerate(straddlers):
+                for j, crossing in enumerate(self.active_crossings):
+                    if crossing['cls'] != cls:
+                        continue
+                    frames_elapsed = self.frame_num - crossing['last_seen_frame']
+                    predicted_cx = crossing['last_cx'] + (frames_elapsed * crossing['velocity'])
+                    dist_pred = abs(cx - predicted_cx)
+                    dist_last = abs(cx - crossing['last_cx'])
+                    tol = self.sway_k * crossing['velocity']
+                    cost = min(dist_pred, dist_last) if dist_last <= tol else dist_pred
+                    C[i, j] = cost
+
+            row_ind, col_ind = linear_sum_assignment(C)
+            for i, j in zip(row_ind, col_ind):
+                if C[i, j] >= self.max_x_distance:
                     continue
-                
-                frames_elapsed = self.frame_num - crossing['last_seen_frame']
-                predicted_cx = crossing['last_cx'] + (frames_elapsed * crossing['velocity'])
-                
-                dist = abs(cx - predicted_cx)
-                if dist < self.max_x_distance and dist < best_dist:
-                    best_match_idx = i
-                    best_dist = dist
-            
-            if best_match_idx != -1:
-                # Update existing crossing + learn its velocity from motion.
-                c = self.active_crossings[best_match_idx]
+                cx, cy, cls = straddlers[i]
+                c = self.active_crossings[j]
                 frames_elapsed = self.frame_num - c['last_seen_frame']
                 if frames_elapsed > 0:
                     observed_v = (cx - c['last_cx']) / frames_elapsed
-                    # Forward-motion only: the belt runs left->right, so a
-                    # zero/backward observed_v (jitter, or a stopped belt) is
-                    # ignored and the last good velocity is held. Caveat: a real
-                    # belt STOP that outlasts max_straddle_disappeared expires the
-                    # crossing, so a stop-then-restart can re-count that bird.
                     if 0 < observed_v < self.max_velocity_px:
                         c['velocity'] = (self.velocity_ema * observed_v
                                          + (1 - self.velocity_ema) * c['velocity'])
                 c['last_cx'] = cx
                 c['last_seen_frame'] = self.frame_num
-                matched_crossings.add(best_match_idx)
-            else:
-                # New crossing!
+                matched_crossings.add(j)
+                matched_straddlers.add(i)
+
+        # New crossings for unmatched straddlers
+        for i, (cx, cy, cls) in enumerate(straddlers):
+            if i in matched_straddlers:
+                continue
+            if not belt_stopped:
                 self.counts[cls] += 1
                 self.active_crossings.append({
                     'cls': cls,
@@ -145,11 +181,14 @@ class ChickenCounter:
                 })
                 self.flash_events.append((cx, cy, cls))
 
-        # Expire old crossings
-        self.active_crossings = [
-            c for c in self.active_crossings
-            if (self.frame_num - c['last_seen_frame']) <= self.max_straddle_disappeared
-        ]
+        # Expire old crossings — but NOT while the belt is stopped, so a parked
+        # bird's crossing survives a long detection flicker and re-matches it
+        # instead of being re-counted.
+        if not belt_stopped:
+            self.active_crossings = [
+                c for c in self.active_crossings
+                if (self.frame_num - c['last_seen_frame']) <= self.max_straddle_disappeared
+            ]
 
         return all_objects
 
