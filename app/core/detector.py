@@ -4,20 +4,17 @@ import warnings
 import numpy as np
 from ultralytics import YOLO
 
-from app.core.model_cache import get_model, preload_model  # noqa: F401
-
 warnings.filterwarnings("ignore", category=FutureWarning)
 if platform.system() != "Windows":
     pathlib.WindowsPath = pathlib.PosixPath
 
 
-def load_model(model_path: str) -> YOLO:
-    return get_model(model_path)
-
-
 def detect_frame(model: YOLO, frame: np.ndarray, conf: float = 0.25,
                  iou: float = 0.45, imgsz: int = 640) -> list[dict]:
-    """Run inference on a single frame. Returns list of detection dicts with class_name."""
+    """Run inference on a single frame. Returns list of detection dicts with class_name.
+
+    Used for the single-image endpoint and the live pre-counting preview only —
+    NOT for counting (counting goes through solutions.ObjectCounter)."""
     results = model(frame, conf=conf, iou=iou, imgsz=imgsz,
                     agnostic_nms=True, verbose=False)
     det_info = []
