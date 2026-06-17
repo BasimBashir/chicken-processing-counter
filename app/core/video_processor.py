@@ -49,6 +49,10 @@ class VideoProcessor:
                  max_disappeared: int = 15, max_distance: int = 55,
                  conf_empty_shackles: float = 0.15,
                  conveyor_speed_px: float = 34.0, zone_half: int = 15,
+                 sway_k: float = 0.6, stop_motion_thresh: float = 0.4,
+                 stop_run_frames: int = 42,
+                 stop_resume_thresh: float = 2.82,
+                 proc_width: int = 1280, proc_height: int = 720,
                  save_raw_path: str = None, is_stream: bool = False):
         self.source = source
         # `model` kept for backward-compat construction; actual inference
@@ -70,14 +74,29 @@ class VideoProcessor:
         self.is_stream = is_stream
         self.save_raw_path = save_raw_path
         self.dropped_frames = 0
-        # Frame width of the live source, learned once capture opens. Used to
-        # recompute the ROI pixel line when roi_position is retuned live.
-        self.frame_width = 0
+        # Fixed processing resolution: EVERY frame is resized to this before
+        # inference + counting, so the counter's pixel thresholds always apply
+        # in the same regime regardless of the source stream's resolution.
+        self.proc_width = int(proc_width)
+        self.proc_height = int(proc_height)
+        # ROI line lives in processing-pixel space (= proc_width * roi_position).
+        self.frame_width = self.proc_width
+        # Belt-stop detection: when the mean abs frame-to-frame pixel change
+        # falls below stop_motion_thresh for a few frames, the belt is treated
+        # as stopped and counting is frozen (no new crossings, no expiry) so a
+        # parked, flickering bird can't be re-counted.
+        self.stop_motion_thresh = float(stop_motion_thresh)
+        self.stop_run_frames = int(stop_run_frames)
+        self.stop_resume_thresh = float(stop_resume_thresh)
+        self._prev_motion_gray = None
+        self._stop_run = 0
+        self._resume_run = 0
+        self.belt_stopped = False
 
         self.counter = ChickenCounter(roi_x=roi_x, max_disappeared=max_disappeared,
                                       max_distance=max_distance,
                                       conveyor_speed_px=conveyor_speed_px,
-                                      zone_half=zone_half)
+                                      zone_half=zone_half, sway_k=sway_k)
 
         self.is_playing = False
         self.is_counting = False
@@ -130,7 +149,9 @@ class VideoProcessor:
     def apply_overrides(self, *, roi_position=None, confidence=None,
                         conf_empty_shackles=None, nms_iou=None, imgsz=None,
                         conveyor_speed_px=None, zone_half=None,
-                        max_distance=None, max_disappeared=None) -> dict:
+                        max_distance=None, max_disappeared=None,
+                        sway_k=None, stop_motion_thresh=None,
+                        stop_run_frames=None, stop_resume_thresh=None) -> dict:
         """Live-retune a RUNNING processor without dropping counts. The capture
         loop reads these attributes each frame, so changes take effect on the
         next processed frame. Only mutable detection/counting params — not the
@@ -159,6 +180,18 @@ class VideoProcessor:
         if zone_half is not None:
             self.counter.zone_half = zone_half
             applied["zone_half"] = zone_half
+        if sway_k is not None:
+            self.counter.sway_k = sway_k
+            applied["sway_k"] = sway_k
+        if stop_motion_thresh is not None:
+            self.stop_motion_thresh = stop_motion_thresh
+            applied["stop_motion_thresh"] = stop_motion_thresh
+        if stop_run_frames is not None:
+            self.stop_run_frames = int(stop_run_frames)
+            applied["stop_run_frames"] = stop_run_frames
+        if stop_resume_thresh is not None:
+            self.stop_resume_thresh = float(stop_resume_thresh)
+            applied["stop_resume_thresh"] = stop_resume_thresh
         if max_distance is not None:
             # Overlay ID tracker only (no count side-effects).
             for t in self.counter.trackers.values():
@@ -186,6 +219,9 @@ class VideoProcessor:
             "fps": round(self.fps_display, 1),
             "is_complete": self.is_complete,
             "is_stream": self.is_stream,
+            "belt_stopped": self.belt_stopped,
+            "stop_run_frames":    self.stop_run_frames,
+            "stop_resume_thresh": self.stop_resume_thresh,
             "dropped_frames": self.dropped_frames,
             "error": self.error,
         }
@@ -207,20 +243,22 @@ class VideoProcessor:
             return
 
         self.fps_source = cap.get(cv2.CAP_PROP_FPS) or 30
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        self.frame_width = width
         self.total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         if self.total_frames <= 0:
             self.is_stream = True
 
-        # ROI x based on actual video width
-        self.counter.roi_x = int(width * (self.roi_x / max(width, 1))) if self.roi_x > 1 else int(width * self.roi_x)
+        # Every frame is resized to the fixed processing resolution, so the ROI
+        # line and all pixel thresholds live in that space. roi_x may arrive as
+        # a fraction (<=1) or an already-resolved processing-pixel value.
+        self.frame_width = self.proc_width
+        self.counter.roi_x = (int(self.proc_width * self.roi_x)
+                              if self.roi_x <= 1 else int(self.roi_x))
 
         if self.save_raw_path:
             fourcc = cv2.VideoWriter_fourcc(*"mp4v")
             self._writer = cv2.VideoWriter(
-                self.save_raw_path, fourcc, self.fps_source, (width, height)
+                self.save_raw_path, fourcc, self.fps_source,
+                (self.proc_width, self.proc_height)
             )
 
         fps_timer = time.time()
@@ -246,6 +284,34 @@ class VideoProcessor:
                     break
                 cap = self._open_capture()
                 continue
+
+            # Fixed processing resolution — resize EVERY frame so inference and
+            # counting always run in the same pixel regime, whatever the source.
+            if frame.shape[1] != self.proc_width or frame.shape[0] != self.proc_height:
+                frame = cv2.resize(frame, (self.proc_width, self.proc_height))
+
+            # Belt-stop detection from raw-frame motion (cheap downscaled diff).
+            # 4 consecutive near-zero-motion frames -> belt considered stopped.
+            _g = cv2.cvtColor(cv2.resize(frame, (160, 90)), cv2.COLOR_BGR2GRAY)
+            if self._prev_motion_gray is not None:
+                _motion = float(cv2.absdiff(_g, self._prev_motion_gray).mean())
+                if not self.belt_stopped:
+                    if _motion < self.stop_motion_thresh:
+                        self._stop_run += 1
+                    else:
+                        self._stop_run = 0
+                    if self._stop_run >= self.stop_run_frames:
+                        self.belt_stopped = True
+                        self._resume_run = 0
+                else:
+                    if _motion > self.stop_resume_thresh:
+                        self._resume_run += 1
+                    else:
+                        self._resume_run = 0
+                    if self._resume_run >= 2:
+                        self.belt_stopped = False
+                        self._stop_run = 0
+            self._prev_motion_gray = _g
 
             if self.is_stream:
                 sig = frame_signature(frame)
@@ -302,7 +368,7 @@ class VideoProcessor:
 
             objects_by_class: dict = {}
             if self.is_counting:
-                objects_by_class = self.counter.update(det_info)
+                objects_by_class = self.counter.update(det_info, belt_stopped=self.belt_stopped)
             else:
                 by_class = {cls: [] for cls in CLASSES}
                 for d in det_info:
