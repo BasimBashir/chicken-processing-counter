@@ -1,19 +1,13 @@
 import cv2
-import numpy as np
 
 COLORS = {
-    "panel_bg":     (20, 20, 20),
-    "panel_border": (60, 60, 60),
-    "accent":       (0, 200, 255),
-    "roi_line":     (80, 80, 255),
-    "roi_glow":     (60, 60, 200),
-    "flash":        (0, 255, 255),
-    "white":        (255, 255, 255),
-    "dim":          (160, 160, 160),
-    "very_dim":     (100, 100, 100),
+    "panel_bg":  (20, 20, 20),
+    "accent":    (0, 200, 255),
+    "white":     (255, 255, 255),
+    "dim":       (160, 160, 160),
 }
 
-# Per-class colors in BGR
+# Per-class colors in BGR (unchanged from the previous annotator).
 CLASS_COLORS = {
     "empty_shackles":      (0, 165, 255),   # orange
     "single_legged":       (255, 200, 0),   # gold/cyan
@@ -41,54 +35,10 @@ def draw_rounded_rect(img, pt1, pt2, color, radius=12, thickness=-1, alpha=0.85)
     cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)
 
 
-
-
-
-def draw_roi_line(img, roi_x, height, frame_num, zone_half=0):
-    """Draw an animated vertical ROI counting line + translucent band."""
-    if zone_half > 0:
-        overlay = img.copy()
-        cv2.rectangle(overlay, (roi_x - zone_half, 0),
-                      (roi_x + zone_half, height), COLORS["roi_glow"], -1)
-        cv2.addWeighted(overlay, 0.18, img, 0.82, 0, img)
-    cv2.line(img, (roi_x, 0), (roi_x, height), COLORS["roi_glow"], 6, cv2.LINE_AA)
-    dash_len = 20
-    gap_len = 12
-    offset = (frame_num * 2) % (dash_len + gap_len)
-    y = -offset
-    while y < height:
-        y1 = max(0, y)
-        y2 = min(height, y + dash_len)
-        if y2 > y1:
-            cv2.line(img, (roi_x, y1), (roi_x, y2), COLORS["roi_line"], 2, cv2.LINE_AA)
-        y += dash_len + gap_len
-    arrow_spacing = 120
-    for ay in range(arrow_spacing // 2, height, arrow_spacing):
-        cv2.arrowedLine(
-            img, (roi_x - 10, ay), (roi_x + 10, ay),
-            COLORS["roi_line"], 2, cv2.LINE_AA, tipLength=0.5
-        )
-
-
-def draw_crossing_flash(img, cx, cy, intensity, class_name):
-    overlay = img.copy()
-    color = CLASS_COLORS.get(class_name, COLORS["accent"])
-    ring_radius = int(8 + 20 * (1.0 - intensity))
-    ring_thickness = max(1, int(2 * intensity))
-    alpha = intensity * 0.6
-    cv2.circle(overlay, (cx, cy), ring_radius, color, ring_thickness, cv2.LINE_AA)
-    if intensity > 0.5:
-        inner_r = int(4 * intensity)
-        cv2.circle(overlay, (cx, cy), inner_r, COLORS["flash"], -1, cv2.LINE_AA)
-    cv2.addWeighted(overlay, alpha, img, 1 - alpha, 0, img)
-
-
-
-
 def draw_bbox(img, x1, y1, x2, y2, counted, conf, class_name, obj_id=None):
+    """Existing corner-accented bbox + small label. Colors/size unchanged."""
     color = CLASS_COLORS.get(class_name, COLORS["accent"])
     if counted:
-        # slightly desaturate counted boxes
         b, g, r = color
         color = (min(b + 40, 255), min(g + 40, 255), min(r + 40, 255))
     corner_len = 8
@@ -110,62 +60,28 @@ def draw_bbox(img, x1, y1, x2, y2, counted, conf, class_name, obj_id=None):
                 cv2.FONT_HERSHEY_SIMPLEX, 0.32, (0, 0, 0), 1, cv2.LINE_AA)
 
 
-def annotate_detections(frame, detections, objects_by_class,
-                        flash_events, roi_x, frame_num, zone_half=0):
-    """Annotate frame with bboxes (class + ID + confidence), ROI line,
-    and crossing flashes. Kept minimal for RTSP production speed.
-    """
+def annotate_boxes(frame, boxes):
+    """Bbox-only annotation. `boxes` is a list of dicts with keys
+    x1,y1,x2,y2,class_name and optional conf,obj_id. No ROI line, no HUD."""
     annotated = frame.copy()
-    height, width = annotated.shape[:2]
-
-    # 1. Bounding boxes (with #ID label from the debug tracker)
-    for info in detections:
-        cls = info.get("class_name", "slaughtered_chicken")
-        cx = (info["x1"] + info["x2"]) // 2
-        cy = (info["y1"] + info["y2"]) // 2
-        matched_id = None
-        for obj_id, (ox, oy) in objects_by_class.get(cls, {}).items():
-            if abs(ox - cx) < 5 and abs(oy - cy) < 5:
-                matched_id = obj_id
-                break
-        draw_bbox(annotated, info["x1"], info["y1"],
-                  info["x2"], info["y2"], counted=False, conf=info["conf"],
-                  class_name=cls, obj_id=matched_id)
-
-    # 2. Vertical ROI line
-    if roi_x is not None:
-        draw_roi_line(annotated, roi_x, height, frame_num, zone_half)
-
-    # 2. Crossing flashes — (fx, fy, cls, f_start)
-    active_flashes = []
-    for (fx, fy, cls, f_start) in flash_events:
-        age = frame_num - f_start
-        if age < 12:
-            intensity = 1.0 - (age / 12.0)
-            draw_crossing_flash(annotated, fx, fy, intensity, cls)
-            active_flashes.append((fx, fy, cls, f_start))
-    flash_events.clear()
-    flash_events.extend(active_flashes)
-
-    # 3. Minimal ROI label
-    if roi_x is not None:
-        cv2.putText(annotated, "COUNTING LINE", (roi_x + 6, 18),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLORS["roi_line"], 2, cv2.LINE_AA)
-
+    for b in boxes:
+        draw_bbox(annotated, int(b["x1"]), int(b["y1"]), int(b["x2"]), int(b["y2"]),
+                  counted=False, conf=float(b.get("conf", 0.0)),
+                  class_name=b.get("class_name", "slaughtered_chicken"),
+                  obj_id=b.get("obj_id"))
     return annotated
 
 
 def annotate_image_detections(frame, det_info):
-    """Annotate a single image. Returns annotated frame and per-class counts dict."""
+    """Annotate a single still. Returns (annotated, per-class counts)."""
     annotated = frame.copy()
     class_counts: dict[str, int] = {}
-
     for info in det_info:
         cls = info.get("class_name", "slaughtered_chicken")
         class_counts[cls] = class_counts.get(cls, 0) + 1
         color = CLASS_COLORS.get(cls, COLORS["accent"])
-        draw_bbox(annotated, info["x1"], info["y1"],
-                  info["x2"], info["y2"], counted=False, conf=info["conf"], class_name=cls)
+        draw_bbox(annotated, info["x1"], info["y1"], info["x2"], info["y2"],
+                  counted=False, conf=info["conf"], class_name=cls)
         cx = (info["x1"] + info["x2"]) // 2
         cy = (info["y1"] + info["y2"]) // 2
         cv2.circle(annotated, (cx, cy), 4, color, -1, cv2.LINE_AA)
@@ -177,5 +93,4 @@ def annotate_image_detections(frame, det_info):
     tw = cv2.getTextSize(f"{total}", cv2.FONT_HERSHEY_SIMPLEX, 1.3, 3)[0][0]
     cv2.putText(annotated, "objects detected", (18 + tw + 8, 48),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLORS["dim"], 1, cv2.LINE_AA)
-
     return annotated, class_counts
