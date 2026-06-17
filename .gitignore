@@ -2,6 +2,7 @@
 docs/*
 !docs/superpowers/
 !docs/API.md
+!docs/DATASET.md
 .venv
 __pycache__
 *.pyc

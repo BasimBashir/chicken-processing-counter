@@ -42,11 +42,11 @@ def main():
         )
 
     # Load YOLO26s pretrained on COCO (transfer learning)
-    model = YOLO("yolo26m.pt")
+    model = YOLO("yolo26s.pt")
 
     model.train(
         data=data_path,
-        epochs=50,
+        epochs=100,
         imgsz=1280,
         multi_scale=0.3,
         batch=-1,
@@ -68,18 +68,23 @@ def main():
         cls=0.5,
         dfl=1.5,
 
-        # Augmentation
+        # Augmentation — keep REALISTIC to a fixed camera over a one-way conveyor.
+        # The big recall lever is the DATASET (see docs/DATASET.md): train on frames
+        # from the ACTUAL deployed 1280x720 stream covering the hard cases — belt
+        # stopped, slow, fast/motion-blurred, dense/occluded. Add motion-blur aug in
+        # Roboflow (fast-belt blur is a likely cause of missed birds).
         hsv_h=0.015,
         hsv_s=0.7,
-        hsv_v=0.4,
-        degrees=10.0,
+        hsv_v=0.5,              # plant lighting drifts — a bit more brightness aug
+        degrees=3.0,            # fixed camera; minimal rotation
         translate=0.1,
-        scale=0.5,
+        scale=0.5,              # pairs with multi_scale for size robustness
         fliplr=0.5,
         flipud=0.0,             # conveyor moves horizontally — no vertical flip
-        mosaic=1.0,
+        mosaic=1.0,             # KEEP: helps dense/small-object detection
         mixup=0.1,
         copy_paste=0.1,
+        erasing=0.4,            # random erasing → robustness to occlusion in the chain
 
         # Scheduler / precision
         cos_lr=True,

@@ -1,8 +1,8 @@
 task: detect
 mode: train
-model: yolo26m.pt
+model: yolo26s.pt
 data: C:\Users\mianx\OneDrive\Desktop\Slaughtered_Chicken_Counting\dataset\data.yaml
-epochs: 50
+epochs: 100
 time: null
 patience: 10
 batch: -1
@@ -89,8 +89,8 @@ angle: 1.0
 nbs: 64
 hsv_h: 0.015
 hsv_s: 0.7
-hsv_v: 0.4
-degrees: 10.0
+hsv_v: 0.5
+degrees: 3.0
 translate: 0.1
 scale: 0.5
 shear: 0.0
