@@ -1,5 +1,6 @@
 import cv2
 import time
+import logging
 import threading
 import subprocess
 import os
@@ -11,6 +12,8 @@ from app.core.detector import detect_frame
 from app.core.model_cache import get_model
 from app.core.annotator import annotate_boxes
 
+log = logging.getLogger("video_processor")
+
 # Prefer TCP for RTSP and disable input buffering for low latency.
 os.environ.setdefault(
     "OPENCV_FFMPEG_CAPTURE_OPTIONS",
@@ -21,6 +24,39 @@ os.environ.setdefault(
 # delivering byte-identical frames at full rate gets a fixed short reconnect.
 FROZEN_FRAME_LIMIT = 150
 FROZEN_RECONNECT_DELAY = 2.0
+
+# Counter hygiene for long-running streams. Ultralytics' ObjectCounter keeps two
+# structures that grow with uptime and are only ever reset by a fresh process:
+#   - counted_ids: a list scanned once per visible object per frame (O(n))
+#   - track_history: a defaultdict(list) with one key per track id EVER seen
+#     (each value holds cpu tensors; on a busy line this is the dominant RSS
+#     leak — measured ~11 GB after 29 h on a single 640x480 stream).
+# We swap counted_ids for an O(1) set and periodically evict finished tracks
+# from track_history. Both are count-neutral (see _AppendableSet / _prune docs).
+PRUNE_INTERVAL_FRAMES = 300      # ~10-15 s at 20-30 fps
+HEALTH_LOG_INTERVAL_S = 30.0
+
+
+class _AppendableSet(set):
+    """A set that also answers to list-style .append(), so it can replace
+    ObjectCounter.counted_ids (Ultralytics calls .append() on it) while giving
+    O(1) membership instead of the stock list's O(n) scan. Count-neutral: track
+    ids are unique and each is added at most once, so `x in set` is identical to
+    `x in list` for the same contents — only the lookup cost changes."""
+
+    append = set.add
+
+
+def _rss_mib() -> float:
+    """Best-effort resident-set size in MiB (Linux /proc); 0.0 elsewhere."""
+    try:
+        with open("/proc/self/status") as fh:
+            for line in fh:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) / 1024.0
+    except Exception:
+        pass
+    return 0.0
 
 
 def reconnect_delay(attempt: int, base: float = 1.0, cap: float = 30.0) -> float:
@@ -94,6 +130,9 @@ class VideoProcessor:
         self._stop_event = threading.Event()
         self._writer = None
 
+        self._frames_since_prune = 0
+        self._last_health_log = 0.0
+
     @property
     def counts(self) -> dict:
         return dict(self._counts)
@@ -158,11 +197,38 @@ class VideoProcessor:
         counter = solutions.ObjectCounter(
             model=self.model_path, region=line_points, show=False, verbose=False,
         )
+        # Replace the stock counted_ids list with an O(1) set (count-neutral —
+        # see _AppendableSet). This also makes the track_history prune's
+        # `tid in counted_ids` check O(1).
+        try:
+            counter.counted_ids = _AppendableSet(getattr(counter, "counted_ids", []) or [])
+        except Exception:
+            pass
         # Match ObjectCounter's own region thickness (line_width * 2) so the line
         # we draw is identical to test.py's plot_im line.
         lw = int(getattr(counter, "line_width", 2) or 2)
         self._line_thickness = max(2, lw * 2)
         return counter
+
+    def _prune_counter_history(self):
+        """Evict track_history entries for objects that are BOTH already counted
+        AND no longer active. Provably count-neutral: a counted id can't be
+        recounted (ObjectCounter short-circuits on `track_id in counted_ids`),
+        and an inactive id has no live trajectory to lose — so dropping its
+        history can neither double-count nor miss a count. Pure memory hygiene
+        against Ultralytics' unbounded track_history (one key per track id ever
+        seen). Called every PRUNE_INTERVAL_FRAMES, so it's O(keys) amortized to
+        near-nothing once the working set stays bounded."""
+        counter = self._counter
+        history = getattr(counter, "track_history", None)
+        counted = getattr(counter, "counted_ids", None)
+        if not history or counted is None:
+            return
+        active = set(getattr(counter, "track_ids", []) or [])
+        stale = [tid for tid in list(history.keys())
+                 if tid not in active and tid in counted]
+        for tid in stale:
+            history.pop(tid, None)
 
     def _run(self):
         cap = self._open_capture()
@@ -239,6 +305,23 @@ class VideoProcessor:
                 fps_frame_count = 0
                 fps_timer = time.time()
 
+            # Periodic health line: makes FPS/RSS decay and counter-state growth
+            # visible in `docker logs` before it bites. track_history should stay
+            # bounded thanks to the prune below; if it climbs, the prune isn't
+            # keeping up and that's the signal to investigate.
+            now = time.time()
+            if now - self._last_health_log >= HEALTH_LOG_INTERVAL_S:
+                self._last_health_log = now
+                counter = self._counter
+                log.info(
+                    "[health] src=%s fps=%.1f rss=%.0fMiB counted_ids=%d "
+                    "track_history=%d frame=%d",
+                    self.source, self.fps_display, _rss_mib(),
+                    len(getattr(counter, "counted_ids", ()) or ()),
+                    len(getattr(counter, "track_history", {}) or {}),
+                    self.frame_num,
+                )
+
             if self._reset_requested:
                 self._counter = self._build_counter(*self._frame_dims)
                 self._reset_requested = False
@@ -258,6 +341,10 @@ class VideoProcessor:
                 self._counts = classwise_to_counts(
                     getattr(results, "classwise_count", {}) or {})
                 boxes = extract_solution_boxes(self._counter)
+                self._frames_since_prune += 1
+                if self._frames_since_prune >= PRUNE_INTERVAL_FRAMES:
+                    self._frames_since_prune = 0
+                    self._prune_counter_history()
             else:
                 try:
                     det = detect_frame(preview_model, frame)

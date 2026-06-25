@@ -1,13 +1,16 @@
---extra-index-url https://download.pytorch.org/whl/cu126
-torch
-torchvision
+# cu128 wheels ship sm_75..sm_120 kernels — required for Blackwell (RTX 5080 =
+# sm_120) and still cover Ampere (RTX 3090 = sm_86). The cu126 build topped out
+# at sm_90, which is why the 5080 raised cudaErrorNoKernelImageForDevice.
+# Pin the exact +cu128 local versions so pip can't resolve a default-index
+# (cu126/CPU) build off PyPI. cu128 currently tops out at torch 2.11.0.
+--extra-index-url https://download.pytorch.org/whl/cu128
+torch==2.11.0+cu128
+torchvision==0.26.0+cu128
 opencv-python-headless
 numpy
 pillow
 ultralytics
-pandas
 tqdm
-seaborn
 fastapi
 uvicorn[standard]
 python-multipart
@@ -21,3 +24,7 @@ onnxruntime-gpu
 # (BuilderFlag.FP16/INT8). Ultralytics 8.4.x's engine exporter still calls
 # config.set_flag(trt.BuilderFlag.FP16), which AttributeErrors on TRT 11.
 tensorrt>=10.0,<11
+# ObjectCounter (counting) deps — pre-installed so ultralytics AutoUpdate never
+# runs at runtime (it otherwise pip-installs these on the first counted frame).
+lap>=0.5.12
+shapely>=2.0.0

@@ -1,0 +1,28 @@
+# Build-context trimmer — the Dockerfile only needs requirements.txt, app/,
+# best.pt and docker-entrypoint.sh. Everything else just slows the build.
+.git
+.venv
+.mypy_cache
+.pytest_cache
+**/__pycache__
+*.pyc
+
+# Model weights not used by the image (only best.pt is COPYed in).
+*.pt
+!best.pt
+
+# Data / training / local IO — never part of the runtime image.
+dataset
+runs
+outputs
+uploads
+app/uploads
+app/outputs
+
+# Docs, tests, tooling, editor cruft.
+docs
+tests
+tools
+*.md
+.claude
+start.bat
