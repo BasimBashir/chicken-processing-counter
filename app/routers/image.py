@@ -33,10 +33,10 @@ async def detect_image(file: UploadFile = File(...)):
         headers={
             "X-Total-Count": str(total),
             "X-Count-Empty-Shackles": str(class_counts.get("empty_shackles", 0)),
-            "X-Count-Single-Legged": str(class_counts.get("single_legged", 0)),
             "X-Count-Slaughtered-Chicken": str(class_counts.get("slaughtered_chicken", 0)),
+            "X-Count-Load": str(class_counts.get("load", 0)),
             "Access-Control-Expose-Headers": (
                 "X-Total-Count, X-Count-Empty-Shackles, "
-                "X-Count-Single-Legged, X-Count-Slaughtered-Chicken"),
+                "X-Count-Slaughtered-Chicken, X-Count-Load"),
         },
     )

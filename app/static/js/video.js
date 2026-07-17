@@ -12,10 +12,14 @@ const feedPlaceholder = document.getElementById("feedPlaceholder");
 const statusDot = document.getElementById("statusDot");
 const statusLabel = document.getElementById("statusLabel");
 const emptyCount = document.getElementById("emptyCount");
-const singleCount = document.getElementById("singleCount");
 const slaughteredCount = document.getElementById("slaughteredCount");
+const loadCount = document.getElementById("loadCount");
 const frameNum = document.getElementById("frameNum");
 const fpsVal = document.getElementById("fpsVal");
+const shipmentCount = document.getElementById("shipmentCount");
+const shipmentIndex = document.getElementById("shipmentIndex");
+const totalShipments = document.getElementById("totalShipments");
+const shipmentStarted = document.getElementById("shipmentStarted");
 const downloadBtn = document.getElementById("downloadBtn");
 
 let sessionId = null;
@@ -94,10 +98,15 @@ function startPolling() {
             const s = resp.ok ? await resp.json() : null;
             if (!s) return;
             emptyCount.textContent = s.counts?.empty_shackles ?? 0;
-            singleCount.textContent = s.counts?.single_legged ?? 0;
             slaughteredCount.textContent = s.counts?.slaughtered_chicken ?? 0;
+            loadCount.textContent = s.counts?.load ?? 0;
             frameNum.textContent = s.total_frames > 0 ? `${s.frame_num}/${s.total_frames}` : s.frame_num;
             fpsVal.textContent = s.fps;
+            const ship = s.current_shipment ?? {};
+            shipmentCount.textContent = ship.slaughtered_count ?? 0;
+            shipmentIndex.textContent = ship.index ?? 0;
+            totalShipments.textContent = s.total_shipments ?? 0;
+            shipmentStarted.textContent = ship.started_at_iso ?? "—";
             if (s.is_complete) {
                 setStatus(false, "Complete");
                 btnPlay.disabled = false;

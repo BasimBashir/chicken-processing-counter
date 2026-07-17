@@ -4,7 +4,9 @@ REST + MJPEG API that detects and **counts chickens crossing a vertical line** o
 left‑to‑right conveyor belt, for images, uploaded videos, and live RTSP streams.
 
 - **Framework:** FastAPI (Python 3.11) · **Vision:** Ultralytics YOLO + `solutions.ObjectCounter`
-- **Model:** `best.pt` — a 3‑class detector: `empty_shackles`, `single_legged`, `slaughtered_chicken`
+- **Model:** `best.pt` — a 3‑class detector: `empty_shackles`, `slaughtered_chicken`, `load`
+  (the `load` class is a fluorescent "LOAD" placard hung ahead of each delivery; it
+  segments the belt into **per‑shipment** spans — see §6 and the `/shipments` endpoints)
 - **Default port:** `5581`
 - **Interactive docs:** once running, open `http://<host>:5581/docs` (Swagger) or `/redoc`
 - **Bundled dashboard (UI):** `http://<host>:5581/` (Image / Video / Stream pages)
@@ -32,7 +34,7 @@ Video/stream feeds return JPEG frames showing:
 - The **counting line** (purple, same as the reference)
 - **No** in/out count HUD, no extra panels
 
-Per‑class colors (BGR): `empty_shackles` = orange, `single_legged` = gold, `slaughtered_chicken` = green.
+Per‑class colors (BGR): `empty_shackles` = orange, `slaughtered_chicken` = green, `load` = magenta.
 
 ---
 
@@ -140,11 +142,11 @@ on the target machine on first boot** and cached to a named Docker volume
 
 ### TRT environment variables
 
-| Var                | Default  | Meaning                                                                            |
-| ------------------ | -------- | ---------------------------------------------------------------------------------- |
-| `TRT_AUTO_BUILD` | `1`    | Build/use a TRT engine on boot. Set `0` to force plain `.pt` (also CPU‑safe). |
-| `TRT_HALF`       | `true` | FP16 precision (recommended on RTX cards).                                         |
-| `TRT_IMGSZ`      | `640`  | Engine input size. Keep `640` for the 640×480 sub‑stream.                      |
+| Var                | Default  | Meaning                                                                           |
+| ------------------ | -------- | --------------------------------------------------------------------------------- |
+| `TRT_AUTO_BUILD` | `1`    | Build/use a TRT engine on boot. Set`0` to force plain `.pt` (also CPU‑safe). |
+| `TRT_HALF`       | `true` | FP16 precision (recommended on RTX cards).                                        |
+| `TRT_IMGSZ`      | `640`  | Engine input size. Keep`640` for the 640×480 sub‑stream.                      |
 
 ### Manual export (alternative to auto‑build)
 
@@ -162,15 +164,16 @@ implementation, so there are **no detection/counting tuning knobs**.
 Set via environment variables (or a `.env` file in the project root). Env var names are
 the uppercased field names.
 
-| Env var          | Field            | Default         | Meaning                                                                      |
-| ---------------- | ---------------- | --------------- | ---------------------------------------------------------------------------- |
-| `MODEL_PATH`   | `model_path`   | `best.pt`     | Path to the model weights (`.pt` or `.engine`).                          |
-| `RTSP_URL`     | `rtsp_url`     | `""`          | Default RTSP URL for the legacy single‑stream endpoint.                     |
-| `RTSP_STREAMS` | `rtsp_streams` | `""`          | JSON list of streams to auto‑start (see below).                             |
-| `MAX_STREAMS`  | `max_streams`  | `10`          | Max concurrent multi‑streams.                                               |
-| `API_KEY`      | `api_key`      | `""`          | If set, requires `X-API-Key` on every `/api/*` call. Empty = open (dev). |
-| `UPLOAD_DIR`   | `upload_dir`   | `app/uploads` | Where uploaded videos are stored.                                            |
-| `OUTPUT_DIR`   | `output_dir`   | `app/outputs` | Where annotated output videos are written.                                   |
+| Env var          | Field            | Default         | Meaning                                                                                                                                            |
+| ---------------- | ---------------- | --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MODEL_PATH`   | `model_path`   | `best.pt`     | Path to the model weights (`.pt` or `.engine`).                                                                                                |
+| `RTSP_URL`     | `rtsp_url`     | `""`          | Default RTSP URL for the legacy single‑stream endpoint.                                                                                           |
+| `RTSP_STREAMS` | `rtsp_streams` | `""`          | JSON list of streams to auto‑start (see below).                                                                                                   |
+| `MAX_STREAMS`  | `max_streams`  | `10`          | Max concurrent multi‑streams.                                                                                                                     |
+| `API_KEY`      | `api_key`      | `""`          | If set, requires`X-API-Key` on every `/api/*` call. Empty = open (dev).                                                                        |
+| `UPLOAD_DIR`   | `upload_dir`   | `app/uploads` | Where uploaded videos are stored.                                                                                                                  |
+| `OUTPUT_DIR`   | `output_dir`   | `app/outputs` | Where annotated output videos are written.                                                                                                         |
+| `TZ`           | —               | `UTC`         | Timezone for shipment`*_iso` timestamps. Set to e.g. `Asia/Karachi` to match the plant's wall clock. Epoch fields are unaffected (always UTC). |
 
 `RTSP_STREAMS` example (auto‑register on startup):
 
@@ -205,7 +208,7 @@ The `counts` object always has these three keys; each value is the number of obj
 that class that have **crossed the line left→right (`IN`)** so far:
 
 ```json
-{ "empty_shackles": 0, "single_legged": 0, "slaughtered_chicken": 0 }
+{ "empty_shackles": 0, "slaughtered_chicken": 0, "load": 0 }
 ```
 
 There is **no `total_count`** field — sum the classes yourself if you need a total.
@@ -216,6 +219,45 @@ There is **no `total_count`** field — sum the classes yourself if you need a t
   starts counting once you **arm counting**. Counts accumulate from the moment counting
   is armed.
 - `reset` (multi‑stream only) rebuilds the counter with a fresh tracker and zeroed counts.
+
+### Shipments (load → load)
+
+The plant hangs a fluorescent **`load`** placard on an empty shackle ahead of each
+delivery. Every time a `load` object crosses the counting line, the current **shipment**
+is closed and the next one opens. A shipment's tally is the number of
+`slaughtered_chicken` that crossed **between two consecutive `load` markers**.
+
+- This is **derived from** the same line crossings — it **never** affects the lifetime
+  `counts` above, which keep accumulating untouched.
+- **Counting only happens between markers.** Before the first `load` of the session there
+  is no active shipment: `current_shipment` is **index 0** with `slaughtered_count: 0` and
+  a `null` start. The **first** `load` opens shipment 1 (discarding the pre‑load birds);
+  the **second** `load` closes shipment 1 — its count is the `slaughtered_chicken` that
+  crossed *between the two markers* — and opens shipment 2; and so on. (So you need two
+  markers to complete one shipment, and the pre‑load span is never counted or emitted.)
+- Every status object carries a live **`current_shipment`** and a **`total_shipments`**
+  (count of *closed* shipments). Closed shipment records are retrieved from the
+  **`/shipments`** endpoints with a `since` index cursor, so a poller can aggregate
+  per day/week/month without missing a boundary.
+
+**Shipment record** (one closed shipment) and **`current_shipment`** (the open one) share
+this shape:
+
+```json
+{
+  "index": 3,
+  "started_at": 1750000000.123,
+  "started_at_iso": "2026-06-25T14:03:20+05:00",
+  "ended_at": 1750000420.456,
+  "ended_at_iso": "2026-06-25T14:10:20+05:00",
+  "slaughtered_count": 184
+}
+```
+
+- `started_at` / `ended_at` are **Unix epoch seconds** (UTC, timezone‑independent — the
+  canonical value). `*_iso` are the same instants formatted in the container's **`TZ`**
+  (see §4). For the open `current_shipment`, `ended_at` / `ended_at_iso` are `null`.
+- Counting `reset` also resets shipment state (index, totals, and the open baseline).
 
 ---
 
@@ -258,8 +300,8 @@ curl -X PATCH http://localhost:5581/api/config \
 | ------------------------------- | ----------------------------------- |
 | `X-Total-Count`               | total objects detected in the image |
 | `X-Count-Empty-Shackles`      | empty_shackles detected             |
-| `X-Count-Single-Legged`       | single_legged detected              |
 | `X-Count-Slaughtered-Chicken` | slaughtered_chicken detected        |
+| `X-Count-Load`                | load markers detected               |
 
 - Invalid image → **`400`**. (This endpoint is plain detection — no line crossing.)
 
@@ -270,16 +312,17 @@ curl -X POST http://localhost:5581/api/image/detect \
 
 ### Video — `/api/video` (uploaded files)
 
-| Method | Path                               | Body / Params              | Returns                                                  |
-| ------ | ---------------------------------- | -------------------------- | -------------------------------------------------------- |
-| POST   | `/api/video/upload`              | `multipart file=<video>` | `{ "session_id": "ab12cd34", "filename": "clip.mp4" }` |
-| POST   | `/api/video/{id}/start`          | —                         | `{ "status": "playing" }`                              |
-| POST   | `/api/video/{id}/stop`           | —                         | `{ "status": "stopped" }`                              |
-| POST   | `/api/video/{id}/counting/start` | —                         | `{ "status": "counting" }`                             |
-| POST   | `/api/video/{id}/counting/stop`  | —                         | `{ "status": "not_counting" }`                         |
-| GET    | `/api/video/{id}/feed`           | —                         | MJPEG stream (annotated)                                 |
-| GET    | `/api/video/{id}/status`         | —                         | Video status object (below)                              |
-| GET    | `/api/video/{id}/download`       | —                         | `video/mp4` annotated output (`404` until ready)     |
+| Method | Path                               | Body / Params              | Returns                                                                |
+| ------ | ---------------------------------- | -------------------------- | ---------------------------------------------------------------------- |
+| POST   | `/api/video/upload`              | `multipart file=<video>` | `{ "session_id": "ab12cd34", "filename": "clip.mp4" }`               |
+| POST   | `/api/video/{id}/start`          | —                         | `{ "status": "playing" }`                                            |
+| POST   | `/api/video/{id}/stop`           | —                         | `{ "status": "stopped" }`                                            |
+| POST   | `/api/video/{id}/counting/start` | —                         | `{ "status": "counting" }`                                           |
+| POST   | `/api/video/{id}/counting/stop`  | —                         | `{ "status": "not_counting" }`                                       |
+| GET    | `/api/video/{id}/feed`           | —                         | MJPEG stream (annotated)                                               |
+| GET    | `/api/video/{id}/status`         | —                         | Video status object (below)                                            |
+| GET    | `/api/video/{id}/shipments`      | `?since=<index>` = 0     | `{ session_id, shipments:[...], total_shipments, current_shipment }` |
+| GET    | `/api/video/{id}/download`       | —                         | `video/mp4` annotated output (`404` until ready)                   |
 
 Unknown `session_id` → **`404`** `Session not found`.
 
@@ -289,13 +332,18 @@ Unknown `session_id` → **`404`** `Session not found`.
 {
   "is_playing": true,
   "is_counting": true,
-  "counts": { "empty_shackles": 8, "single_legged": 0, "slaughtered_chicken": 146 },
+  "counts": { "empty_shackles": 8, "slaughtered_chicken": 146, "load": 2 },
   "frame_num": 1500,
   "total_frames": 8997,
   "fps": 28.4,
   "is_complete": false,
   "is_stream": false,
-  "error": null
+  "error": null,
+  "current_shipment": {
+    "index": 2, "started_at": 1750000420.4, "started_at_iso": "2026-06-25T14:10:20+05:00",
+    "ended_at": null, "ended_at_iso": null, "slaughtered_count": 73
+  },
+  "total_shipments": 2
 }
 ```
 
@@ -316,24 +364,28 @@ GET  /api/video/{id}/download     -> save annotated .mp4
 
 Backward‑compatible single‑stream API. Proxies to one stream with id `default`.
 
-| Method | Path                           | Body                                        | Returns                                     |
-| ------ | ------------------------------ | ------------------------------------------- | ------------------------------------------- |
-| POST   | `/api/stream/start`          | `{ "url"? }` (falls back to `RTSP_URL`) | `{ "status": "connected", "url": "..." }` |
-| POST   | `/api/stream/stop`           | —                                          | `{ "status": "disconnected" }`            |
-| POST   | `/api/stream/counting/start` | —                                          | `{ "status": "counting" }`                |
-| POST   | `/api/stream/counting/stop`  | —                                          | `{ "status": "not_counting" }`            |
-| GET    | `/api/stream/feed`           | —                                          | MJPEG stream                                |
-| GET    | `/api/stream/status`         | —                                          | see below                                   |
+| Method | Path                           | Body                                        | Returns                                                                           |
+| ------ | ------------------------------ | ------------------------------------------- | --------------------------------------------------------------------------------- |
+| POST   | `/api/stream/start`          | `{ "url"? }` (falls back to `RTSP_URL`) | `{ "status": "connected", "url": "..." }`                                       |
+| POST   | `/api/stream/stop`           | —                                          | `{ "status": "disconnected" }`                                                  |
+| POST   | `/api/stream/counting/start` | —                                          | `{ "status": "counting" }`                                                      |
+| POST   | `/api/stream/counting/stop`  | —                                          | `{ "status": "not_counting" }`                                                  |
+| GET    | `/api/stream/feed`           | —                                          | MJPEG stream                                                                      |
+| GET    | `/api/stream/status`         | —                                          | see below                                                                         |
+| GET    | `/api/stream/shipments`      | `?since=<index>` = 0                      | `{ shipments:[...], total_shipments, current_shipment }` (`400` if no stream) |
 
 - `start` with no URL and no `RTSP_URL` → **`400`**; capacity reached → **`429`**.
-- `counting/*` and `feed` when no stream is active → **`400`**.
+- `counting/*`, `feed`, and `shipments` when no stream is active → **`400`**.
 
 **Legacy stream status:**
 
 ```json
 { "is_connected": true, "is_counting": true,
-  "counts": { "empty_shackles": 0, "single_legged": 0, "slaughtered_chicken": 0 },
-  "fps": 25.0, "error": null }
+  "counts": { "empty_shackles": 0, "slaughtered_chicken": 0, "load": 0 },
+  "fps": 25.0, "error": null,
+  "current_shipment": { "index": 0, "started_at": null, "started_at_iso": null,
+    "ended_at": null, "ended_at_iso": null, "slaughtered_count": 0 },
+  "total_shipments": 0 }
 ```
 
 (When no stream is connected, the same shape is returned with `is_connected:false` and no `error` key.)
@@ -348,6 +400,7 @@ Run many RTSP streams concurrently, each with its own counter and id.
 | POST   | `/api/streams`                     | `{ "id", "url", "start_counting"? = true }` | `201` + `<stream info>`                                    |
 | DELETE | `/api/streams/{id}`                | —                                            | `{ "status": "removed", "id": "..." }`                       |
 | GET    | `/api/streams/{id}/status`         | —                                            | `<stream info>`                                              |
+| GET    | `/api/streams/{id}/shipments`      | `?since=<index>` = 0                        | `{ id, shipments:[...], total_shipments, current_shipment }` |
 | GET    | `/api/streams/{id}/feed`           | —                                            | MJPEG stream                                                   |
 | POST   | `/api/streams/{id}/counting/start` | —                                            | `{ "status": "counting", "id": "..." }`                      |
 | POST   | `/api/streams/{id}/counting/stop`  | —                                            | `{ "status": "not_counting", "id": "..." }`                  |
@@ -363,10 +416,25 @@ Run many RTSP streams concurrently, each with its own counter and id.
   "url": "rtsp://cam1:554/Streaming/Channels/102",
   "is_playing": true,
   "is_counting": true,
-  "counts": { "empty_shackles": 12, "single_legged": 1, "slaughtered_chicken": 240 },
+  "counts": { "empty_shackles": 12, "slaughtered_chicken": 240, "load": 3 },
   "fps": 25.0,
-  "error": null
+  "error": null,
+  "current_shipment": {
+    "index": 3, "started_at": 1750000420.4, "started_at_iso": "2026-06-25T14:10:20+05:00",
+    "ended_at": null, "ended_at_iso": null, "slaughtered_count": 56
+  },
+  "total_shipments": 3
 }
+```
+
+**Shipments poll** (incremental, never misses a boundary):
+
+```bash
+# first call: get everything; then pass the next index as the cursor
+curl "http://localhost:5581/api/streams/line-1/shipments?since=0"
+# -> { "id":"line-1", "shipments":[ {"index":0,...}, {"index":1,...}, {"index":2,...} ],
+#      "total_shipments":3, "current_shipment":{ "index":3, ... } }
+curl "http://localhost:5581/api/streams/line-1/shipments?since=3"   # only index >= 3
 ```
 
 ```bash
@@ -415,6 +483,13 @@ reverse proxy, or keep the feed endpoints behind your own gateway.
 ## 9. Notes, gotchas & migration
 
 - **No `total_count`** anywhere — counts are per class only.
+- **Classes changed:** `single_legged` was **retired**; **`load`** was added. The model is
+  still 3‑class: `empty_shackles`, `slaughtered_chicken`, `load`. The image endpoint's
+  `X-Count-Single-Legged` header was likewise replaced by `X-Count-Load`.
+- **Shipments are additive:** the `load`→`load` segmentation only *reads* the line
+  crossings; it never resets or competes with the lifetime `counts`. See §6.
+- **Timestamps:** shipment epoch fields are UTC and always correct; the `*_iso` strings
+  follow the container `TZ` — set `-e TZ=Area/City` so they match the plant's wall clock.
 - **Removed** vs older versions: the live‑tuning `PATCH /api/streams/{id}` and
   `PATCH /api/video/{id}` endpoints, and all detection/counting tuning config
   (confidence, nms_iou, imgsz, roi_position, conveyor_speed_px, zone_half, sway_k,

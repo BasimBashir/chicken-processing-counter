@@ -65,6 +65,20 @@ def video_status(session_id: str):
     return _get_session(session_id).get_status()
 
 
+@router.get("/{session_id}/shipments")
+def video_shipments(session_id: str, since: int = 0):
+    """Closed shipment records (index >= `since`) plus the live open shipment for
+    this uploaded-video session."""
+    proc = _get_session(session_id)
+    status = proc.get_status()
+    return {
+        "session_id": session_id,
+        "shipments": proc.get_shipments(since),
+        "total_shipments": status["total_shipments"],
+        "current_shipment": status["current_shipment"],
+    }
+
+
 @router.get("/{session_id}/download")
 def download_video(session_id: str):
     snap = runtime_config.snapshot()

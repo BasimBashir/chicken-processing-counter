@@ -51,12 +51,12 @@
                     <div class="label">Empty Shackles</div>
                 </div>
                 <div class="stat">
-                    <div class="value amber" id="singleCount">0</div>
-                    <div class="label">Single Legged</div>
-                </div>
-                <div class="stat">
                     <div class="value green" id="slaughteredCount">0</div>
                     <div class="label">Slaughtered</div>
+                </div>
+                <div class="stat">
+                    <div class="value pink" id="loadCount">0</div>
+                    <div class="label">Load Markers</div>
                 </div>
                 <div class="stat">
                     <div class="value accent" id="frameNum">0</div>
@@ -70,8 +70,29 @@
 
             <div class="class-legend" style="margin-top:12px;">
                 <div class="legend-item"><div class="legend-dot" style="background:#ff9100;"></div> Empty Shackles</div>
-                <div class="legend-item"><div class="legend-dot" style="background:#ffc400;"></div> Single Legged</div>
                 <div class="legend-item"><div class="legend-dot" style="background:#00e676;"></div> Slaughtered Chicken</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#ff2bd6;"></div> Load Marker</div>
+            </div>
+
+            <h2 class="page-title" style="font-size:18px; margin-top:32px;">Current Shipment (load&#8594;load)</h2>
+            <p class="page-subtitle" style="margin-bottom:16px;">Slaughtered chickens counted between two LOAD markers. Independent of the lifetime totals above.</p>
+            <div class="stats-panel">
+                <div class="stat">
+                    <div class="value pink" id="shipmentCount">0</div>
+                    <div class="label">This Shipment</div>
+                </div>
+                <div class="stat">
+                    <div class="value white" id="shipmentIndex">0</div>
+                    <div class="label">Shipment #</div>
+                </div>
+                <div class="stat">
+                    <div class="value accent" id="totalShipments">0</div>
+                    <div class="label">Completed</div>
+                </div>
+                <div class="stat">
+                    <div class="value white" id="shipmentStarted" style="font-size:15px; word-break:break-all;">&#8212;</div>
+                    <div class="label">Started</div>
+                </div>
             </div>
 
             <div class="controls" style="margin-top: 20px;">
@@ -80,6 +101,6 @@
         </div>
     </div>
 
-    <script src="/js/video.js?v=3"></script>
+    <script src="/js/video.js?v=4"></script>
 </body>
 </html>

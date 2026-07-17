@@ -40,10 +40,12 @@ app = FastAPI(
     title="Slaughtered Chicken Counter",
     version="2.0.0",
     description=(
-        "3-class chicken counting API for left-to-right conveyor belts. "
-        "Classes: empty_shackles, single_legged, slaughtered_chicken. "
+        "Chicken counting API for left-to-right conveyor belts. "
+        "Classes: empty_shackles, slaughtered_chicken, load. "
         "Counting via ultralytics ObjectCounter on a vertical center line — "
-        "objects counted as they cross left to right. Multi-stream RTSP support."
+        "objects counted as they cross left to right. The `load` placard "
+        "segments the belt into per-shipment spans (load->load); see the "
+        "/shipments endpoints. Multi-stream RTSP support."
     ),
     lifespan=lifespan,
 )

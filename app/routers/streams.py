@@ -55,6 +55,21 @@ def stream_status(stream_id: str):
     return _info_to_dict(_resolve(stream_id, info=True))
 
 
+@router.get("/{stream_id}/shipments")
+def stream_shipments(stream_id: str, since: int = 0):
+    """Closed shipment records (index >= `since`) plus the live open shipment, so
+    a downstream poller can aggregate per day/week/month without missing a
+    load-to-load boundary. Lifetime counts are unaffected by this view."""
+    proc = _resolve(stream_id)
+    status = proc.get_status()
+    return {
+        "id": stream_id,
+        "shipments": proc.get_shipments(since),
+        "total_shipments": status["total_shipments"],
+        "current_shipment": status["current_shipment"],
+    }
+
+
 @router.get("/{stream_id}/feed")
 def stream_feed(stream_id: str):
     proc = _resolve(stream_id)
@@ -96,6 +111,8 @@ def _info_to_dict(info) -> dict:
         "counts": info.counts,
         "fps": info.fps,
         "error": info.error,
+        "current_shipment": info.current_shipment,
+        "total_shipments": info.total_shipments,
     }
 
 

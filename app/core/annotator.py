@@ -13,17 +13,21 @@ COLORS = {
 # line on our frames is 100% the same as test.py's plot_im line.
 REGION_COLOR = (104, 0, 123)
 
-# Per-class colors in BGR (unchanged from the previous annotator).
+# Per-class colors in BGR. `single_legged` is retired but kept as a harmless
+# fallback so an older model still labels correctly; `load` is the fluorescent
+# placard, drawn magenta to echo its real-world colour.
 CLASS_COLORS = {
     "empty_shackles":      (0, 165, 255),   # orange
-    "single_legged":       (255, 200, 0),   # gold/cyan
+    "single_legged":       (255, 200, 0),   # gold/cyan (legacy)
     "slaughtered_chicken": (0, 230, 118),   # green
+    "load":                (214, 43, 255),  # magenta/pink
 }
 
 CLASS_LABELS = {
     "empty_shackles":      "E.Shackle",
     "single_legged":       "Single",
     "slaughtered_chicken": "Slaughtered",
+    "load":                "LOAD",
 }
 
 

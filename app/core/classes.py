@@ -1,10 +1,14 @@
-"""Shared detection class names for the 3-class chicken model (best.pt) and a
-helper to flatten ObjectCounter's classwise output to per-class IN counts.
+"""Shared detection class names for the chicken model (best.pt) and a helper to
+flatten ObjectCounter's classwise output to per-class IN counts.
+
+Classes (3): empty_shackles, slaughtered_chicken, load. `single_legged` was
+retired; `load` is the fluorescent "LOAD" placard hung ahead of each delivery,
+used to segment the belt into per-shipment spans (see app/core/shipment.py).
 
 Kept dependency-free (no ultralytics/torch) so it imports cheaply anywhere.
 """
 
-CLASSES = ["empty_shackles", "single_legged", "slaughtered_chicken"]
+CLASSES = ["empty_shackles", "slaughtered_chicken", "load"]
 
 
 def classwise_to_counts(classwise_count: dict, classes=CLASSES) -> dict:

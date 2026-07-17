@@ -3,8 +3,8 @@ const fileInput = document.getElementById("fileInput");
 const results = document.getElementById("results");
 const totalCount = document.getElementById("totalCount");
 const emptyCount = document.getElementById("emptyCount");
-const singleCount = document.getElementById("singleCount");
 const slaughteredCount = document.getElementById("slaughteredCount");
+const loadCount = document.getElementById("loadCount");
 const originalImg = document.getElementById("originalImg");
 const annotatedImg = document.getElementById("annotatedImg");
 const downloadBtn = document.getElementById("downloadBtn");
@@ -40,8 +40,8 @@ async function handleFile(file) {
         const resp = await fetch("/api/image/detect", { method: "POST", body: formData });
         totalCount.textContent = resp.headers.get("X-Total-Count") || "0";
         emptyCount.textContent = resp.headers.get("X-Count-Empty-Shackles") || "0";
-        singleCount.textContent = resp.headers.get("X-Count-Single-Legged") || "0";
         slaughteredCount.textContent = resp.headers.get("X-Count-Slaughtered-Chicken") || "0";
+        loadCount.textContent = resp.headers.get("X-Count-Load") || "0";
 
         const blob = await resp.blob();
         const url = URL.createObjectURL(blob);

@@ -12,6 +12,7 @@
     --red: #ff5252;
     --amber: #ffc400;
     --orange: #ff9100;
+    --pink: #ff2bd6;
     --radius: 12px;
 }
 
@@ -196,6 +197,7 @@ body {
 .stat .value.accent  { color: var(--accent); }
 .stat .value.amber   { color: var(--amber); }
 .stat .value.orange  { color: var(--orange); }
+.stat .value.pink    { color: var(--pink); }
 .stat .value.white   { color: var(--text); }
 
 .stat .label {

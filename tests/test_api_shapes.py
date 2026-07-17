@@ -27,8 +27,17 @@ def test_streams_list_has_no_total_count():
 def test_legacy_stream_status_shape():
     with TestClient(app) as client:
         s = client.get("/api/stream/status").json()
-        assert set(s.keys()) == {"is_connected", "is_counting", "counts", "fps"}
+        assert set(s.keys()) == {
+            "is_connected", "is_counting", "counts", "fps",
+            "current_shipment", "total_shipments",
+        }
         assert "total_count" not in s
+
+
+def test_legacy_stream_shipments_when_disconnected():
+    with TestClient(app) as client:
+        # No 'default' stream registered -> 400, not a crash.
+        assert client.get("/api/stream/shipments").status_code == 400
 
 
 def test_video_patch_endpoint_removed():

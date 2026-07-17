@@ -17,7 +17,7 @@
 
     <div class="container">
         <h1 class="page-title">Image Detection</h1>
-        <p class="page-subtitle">Upload an image to detect and count empty shackles, single-legged, and slaughtered chickens</p>
+        <p class="page-subtitle">Upload an image to detect and count empty shackles, slaughtered chickens, and load markers</p>
 
         <div class="card">
             <div class="upload-zone" id="uploadZone">
@@ -39,19 +39,19 @@
                     <div class="label">Empty Shackles</div>
                 </div>
                 <div class="stat">
-                    <div class="value amber" id="singleCount">0</div>
-                    <div class="label">Single Legged</div>
-                </div>
-                <div class="stat">
                     <div class="value green" id="slaughteredCount">0</div>
                     <div class="label">Slaughtered</div>
+                </div>
+                <div class="stat">
+                    <div class="value pink" id="loadCount">0</div>
+                    <div class="label">Load Markers</div>
                 </div>
             </div>
 
             <div class="class-legend">
                 <div class="legend-item"><div class="legend-dot" style="background:#ff9100;"></div> Empty Shackles</div>
-                <div class="legend-item"><div class="legend-dot" style="background:#ffc400;"></div> Single Legged</div>
                 <div class="legend-item"><div class="legend-dot" style="background:#00e676;"></div> Slaughtered Chicken</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#ff2bd6;"></div> Load Marker</div>
             </div>
 
             <div class="result-grid" style="margin-top:20px;">
@@ -71,6 +71,6 @@
         </div>
     </div>
 
-    <script src="/js/image.js?v=2"></script>
+    <script src="/js/image.js?v=3"></script>
 </body>
 </html>

@@ -8,9 +8,13 @@ const feedPlaceholder = document.getElementById("feedPlaceholder");
 const statusDot = document.getElementById("statusDot");
 const statusLabel = document.getElementById("statusLabel");
 const emptyCount = document.getElementById("emptyCount");
-const singleCount = document.getElementById("singleCount");
 const slaughteredCount = document.getElementById("slaughteredCount");
+const loadCount = document.getElementById("loadCount");
 const fpsVal = document.getElementById("fpsVal");
+const shipmentCount = document.getElementById("shipmentCount");
+const shipmentIndex = document.getElementById("shipmentIndex");
+const totalShipments = document.getElementById("totalShipments");
+const shipmentStarted = document.getElementById("shipmentStarted");
 
 let pollInterval = null;
 
@@ -80,9 +84,14 @@ function startPolling() {
             const resp = await fetch("/api/stream/status");
             const s = await resp.json();
             emptyCount.textContent = s.counts?.empty_shackles ?? 0;
-            singleCount.textContent = s.counts?.single_legged ?? 0;
             slaughteredCount.textContent = s.counts?.slaughtered_chicken ?? 0;
+            loadCount.textContent = s.counts?.load ?? 0;
             fpsVal.textContent = s.fps;
+            const ship = s.current_shipment ?? {};
+            shipmentCount.textContent = ship.slaughtered_count ?? 0;
+            shipmentIndex.textContent = ship.index ?? 0;
+            totalShipments.textContent = s.total_shipments ?? 0;
+            shipmentStarted.textContent = ship.started_at_iso ?? "—";
             if (!s.is_connected) {
                 setStatus(false, s.error || "Disconnected");
                 btnConnect.disabled = false;

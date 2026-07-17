@@ -11,6 +11,7 @@ from app.core.classes import CLASSES, classwise_to_counts
 from app.core.detector import detect_frame
 from app.core.model_cache import get_model
 from app.core.annotator import annotate_boxes
+from app.core.shipment import ShipmentTracker, LOAD_CLASS, SHIPMENT_COUNT_CLASS
 
 log = logging.getLogger("video_processor")
 
@@ -118,6 +119,10 @@ class VideoProcessor:
         self.error = None
 
         self._counts = {c: 0 for c in CLASSES}
+        # Load-to-load shipment segmentation. Reads the cumulative counts the
+        # ObjectCounter already produces; never mutates them, so the lifetime
+        # totals above keep climbing untouched.
+        self._shipment = ShipmentTracker()
         self._counter = None          # solutions.ObjectCounter, built on first frame
         self._frame_dims = None       # (w, h) of the source
         self._line_points = None      # counting line [(x,0),(x,h)] for the overlay
@@ -166,7 +171,14 @@ class VideoProcessor:
         """Zero counts and rebuild the ObjectCounter (fresh tracker) on the next
         processed frame. Thread-safe — the rebuild happens in the capture loop."""
         self._counts = {c: 0 for c in CLASSES}
+        # The counter is about to jump back to zero; resync the shipment baseline
+        # so the derived per-shipment count can't go negative.
+        self._shipment.reset()
         self._reset_requested = True
+
+    def get_shipments(self, since: int = 0) -> list[dict]:
+        """Closed (completed) shipment records with index >= `since`."""
+        return self._shipment.records_since(since)
 
     def get_status(self) -> dict:
         return {
@@ -179,6 +191,9 @@ class VideoProcessor:
             "is_complete": self.is_complete,
             "is_stream": self.is_stream,
             "error": self.error,
+            "current_shipment": self._shipment.current(
+                self._counts.get(SHIPMENT_COUNT_CLASS, 0)),
+            "total_shipments": self._shipment.total_shipments(),
         }
 
     def _open_capture(self):
@@ -340,6 +355,13 @@ class VideoProcessor:
                     continue
                 self._counts = classwise_to_counts(
                     getattr(results, "classwise_count", {}) or {})
+                # Segment into shipments: a rising cumulative `load` count means a
+                # LOAD placard just crossed the line -> close the open shipment,
+                # open the next. Read-only on self._counts (the lifetime totals).
+                self._shipment.update(
+                    load_cum=self._counts.get(LOAD_CLASS, 0),
+                    slaughtered_cum=self._counts.get(SHIPMENT_COUNT_CLASS, 0),
+                )
                 boxes = extract_solution_boxes(self._counter)
                 self._frames_since_prune += 1
                 if self._frames_since_prune >= PRUNE_INTERVAL_FRAMES:

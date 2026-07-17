@@ -6,7 +6,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
     curl \
+    tzdata \
     && rm -rf /var/lib/apt/lists/*
+
+# Containers default to UTC. Shipment timestamps are stored as Unix epoch (always
+# correct), but their human-readable ISO strings render in $TZ — override this at
+# `docker run` with `-e TZ=Area/City` (e.g. TZ=Asia/Karachi) to match the plant's
+# wall clock. tzdata (apt above + the tzdata pip wheel) makes named zones resolve.
+ENV TZ=UTC
 
 WORKDIR /app
 

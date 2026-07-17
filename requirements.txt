@@ -9,6 +9,9 @@ torchvision==0.26.0+cu128
 opencv-python-headless
 numpy
 pillow
+# IANA timezone database for zoneinfo, so shipment timestamps resolve named
+# zones (e.g. TZ=Asia/Karachi) on slim/Windows hosts with no system tzdb.
+tzdata
 ultralytics
 tqdm
 fastapi

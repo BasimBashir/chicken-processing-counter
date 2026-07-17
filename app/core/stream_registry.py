@@ -22,6 +22,8 @@ class StreamInfo:
     counts: dict
     fps: float
     error: Optional[str]
+    current_shipment: dict
+    total_shipments: int
 
 
 class StreamRegistryError(Exception):
@@ -118,6 +120,8 @@ class StreamRegistry:
             counts=status["counts"],
             fps=status["fps"],
             error=status.get("error"),
+            current_shipment=status.get("current_shipment", {}),
+            total_shipments=status.get("total_shipments", 0),
         )
 
     def stop_all(self) -> None:

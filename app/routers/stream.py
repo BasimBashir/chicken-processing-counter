@@ -27,6 +27,15 @@ router = APIRouter(
 
 _DEFAULT_ID = "default"
 
+# Shape-stable placeholder for the open shipment when no stream is connected, so
+# the status contract is identical whether or not a stream exists.
+_EMPTY_SHIPMENT = {
+    "index": 0,
+    "started_at": None, "started_at_iso": None,
+    "ended_at": None, "ended_at_iso": None,
+    "slaughtered_count": 0,
+}
+
 
 class StreamStart(BaseModel):
     url: str | None = None
@@ -91,6 +100,8 @@ def stream_status():
             "is_counting": False,
             "counts": {cls: 0 for cls in CLASSES},
             "fps": 0,
+            "current_shipment": _EMPTY_SHIPMENT,
+            "total_shipments": 0,
         }
     info = registry.info(_DEFAULT_ID)
     return {
@@ -99,6 +110,21 @@ def stream_status():
         "counts": info.counts,
         "fps": info.fps,
         "error": info.error,
+        "current_shipment": info.current_shipment,
+        "total_shipments": info.total_shipments,
+    }
+
+
+@router.get("/shipments")
+def stream_shipments(since: int = 0):
+    """Closed shipment records (index >= `since`) plus the live open shipment for
+    the legacy 'default' stream. Mirrors GET /api/streams/{id}/shipments."""
+    proc = _default_or_400()
+    status = proc.get_status()
+    return {
+        "shipments": proc.get_shipments(since),
+        "total_shipments": status["total_shipments"],
+        "current_shipment": status["current_shipment"],
     }
 
 

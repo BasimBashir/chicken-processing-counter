@@ -35,7 +35,7 @@ def test_annotate_boxes_draws_region_line():
 def test_annotate_image_detections_still_returns_counts():
     frame = np.zeros((200, 320, 3), dtype=np.uint8)
     det = [{"x1": 5, "y1": 5, "x2": 50, "y2": 60,
-            "conf": 0.8, "class_name": "single_legged"}]
+            "conf": 0.8, "class_name": "load"}]
     out, counts = annotate_image_detections(frame, det)
     assert out.shape == frame.shape
-    assert counts == {"single_legged": 1}
+    assert counts == {"load": 1}
