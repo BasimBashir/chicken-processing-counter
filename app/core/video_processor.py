@@ -11,7 +11,8 @@ from app.core.classes import CLASSES, classwise_to_counts
 from app.core.detector import detect_frame
 from app.core.model_cache import get_model
 from app.core.annotator import annotate_boxes
-from app.core.shipment import ShipmentTracker, LOAD_CLASS, SHIPMENT_COUNT_CLASS
+from app.core.shipment import (ShipmentTracker, EmptyGapFilter, LOAD_CLASS,
+                               SHIPMENT_COUNT_CLASS, EMPTY_CLASS)
 
 log = logging.getLogger("video_processor")
 
@@ -123,6 +124,10 @@ class VideoProcessor:
         # ObjectCounter already produces; never mutates them, so the lifetime
         # totals above keep climbing untouched.
         self._shipment = ShipmentTracker()
+        # Drops the irrelevant empty-shackle run between a LOAD placard and the
+        # delivery's first bird from the REPORTED empty count (all endpoints/UI
+        # read self._counts). Derived read-only from the same cumulatives.
+        self._empty_gap = EmptyGapFilter()
         self._counter = None          # solutions.ObjectCounter, built on first frame
         self._frame_dims = None       # (w, h) of the source
         self._line_points = None      # counting line [(x,0),(x,h)] for the overlay
@@ -174,11 +179,31 @@ class VideoProcessor:
         # The counter is about to jump back to zero; resync the shipment baseline
         # so the derived per-shipment count can't go negative.
         self._shipment.reset()
+        self._empty_gap.reset()
         self._reset_requested = True
 
     def get_shipments(self, since: int = 0) -> list[dict]:
         """Closed (completed) shipment records with index >= `since`."""
         return self._shipment.records_since(since)
+
+    def _update_counts(self, classwise_count: dict) -> None:
+        """Publish this frame's counts from the counter's cumulative classwise
+        totals. The reported empty_shackles value is gap-adjusted: empties
+        between a LOAD placard and the delivery's first bird are dropped
+        (EmptyGapFilter). Shipment segmentation reads the raw cumulatives —
+        a rising `load` count closes the open shipment and opens the next.
+        Both are read-only on the counter; the dict swap is atomic for readers."""
+        counts = classwise_to_counts(classwise_count)
+        counts[EMPTY_CLASS] = self._empty_gap.update(
+            load_cum=counts.get(LOAD_CLASS, 0),
+            empty_cum=counts.get(EMPTY_CLASS, 0),
+            chicken_cum=counts.get(SHIPMENT_COUNT_CLASS, 0),
+        )
+        self._counts = counts
+        self._shipment.update(
+            load_cum=counts.get(LOAD_CLASS, 0),
+            slaughtered_cum=counts.get(SHIPMENT_COUNT_CLASS, 0),
+        )
 
     def get_status(self) -> dict:
         return {
@@ -353,15 +378,8 @@ class VideoProcessor:
                 except Exception as exc:
                     self.error = f"Counting failed: {exc}"
                     continue
-                self._counts = classwise_to_counts(
+                self._update_counts(
                     getattr(results, "classwise_count", {}) or {})
-                # Segment into shipments: a rising cumulative `load` count means a
-                # LOAD placard just crossed the line -> close the open shipment,
-                # open the next. Read-only on self._counts (the lifetime totals).
-                self._shipment.update(
-                    load_cum=self._counts.get(LOAD_CLASS, 0),
-                    slaughtered_cum=self._counts.get(SHIPMENT_COUNT_CLASS, 0),
-                )
                 boxes = extract_solution_boxes(self._counter)
                 self._frames_since_prune += 1
                 if self._frames_since_prune >= PRUNE_INTERVAL_FRAMES:

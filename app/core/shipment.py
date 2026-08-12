@@ -30,6 +30,7 @@ from app.core.timeutil import epoch, iso_local
 # LOAD_CLASS here to match.
 LOAD_CLASS = "load"
 SHIPMENT_COUNT_CLASS = "slaughtered_chicken"
+EMPTY_CLASS = "empty_shackles"
 
 # How many closed shipments to retain in memory for the /shipments cursor. A
 # day is ~10-12 shipments, so this holds well over a month; the downstream UI
@@ -50,6 +51,64 @@ def _record(index: int, started_at: float, ended_at: float | None,
         "ended_at_iso": iso_local(ended_at),
         "slaughtered_count": slaughtered_count,
     }
+
+
+class EmptyGapFilter:
+    """Drops the irrelevant run of empty shackles between a LOAD placard and the
+    first bird of that delivery from the reported ``empty_shackles`` count.
+
+    From the frame a ``load`` crossing is observed until the first
+    ``slaughtered_chicken`` crossing after it, empty-shackle crossings accrue to
+    an internal ``discarded`` total instead of the visible count; ``update``
+    returns the adjusted cumulative (``empty_cum - discarded``). Before the
+    first load, and once a delivery's first bird has crossed, empties count
+    normally. Same-frame ties are attributed by the state BEFORE the frame's
+    transitions, which matches the one-way belt order: an empty seen alongside
+    the placard was downstream of it (still the previous span — counted), one
+    seen alongside the gap-ending bird was still in the gap (dropped).
+
+    Like ShipmentTracker this only ever READS the counter's cumulative totals;
+    it never resets or mutates the counter. Thread-safe: fed from the capture
+    loop, reset from API request threads."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self.reset()
+
+    def reset(self) -> None:
+        """Zero all state. Called when the underlying counter is rebuilt so a
+        stale gap or stale discards can't eat the fresh counter's empties."""
+        with self._lock:
+            self._in_gap = False
+            self._discarded = 0
+            self._last_load = 0
+            self._last_empty = 0
+            self._last_chicken = 0
+
+    def update(self, load_cum: int, empty_cum: int, chicken_cum: int) -> int:
+        """Feed the latest cumulative counts; returns the adjusted cumulative
+        empty count. A falling cumulative means the counter was rebuilt
+        underneath us (reset is handled separately): resync to the new values
+        with the gap closed and discards cleared."""
+        with self._lock:
+            if (load_cum < self._last_load or empty_cum < self._last_empty
+                    or chicken_cum < self._last_chicken):
+                self._in_gap = False
+                self._discarded = 0
+            else:
+                # Attribute this frame's empties by the PRIOR state, then apply
+                # transitions — chicken closes the gap before a load reopens it,
+                # so a same-frame bird+placard starts the next delivery's gap.
+                if self._in_gap:
+                    self._discarded += empty_cum - self._last_empty
+                if chicken_cum > self._last_chicken:
+                    self._in_gap = False
+                if load_cum > self._last_load:
+                    self._in_gap = True
+            self._last_load = load_cum
+            self._last_empty = empty_cum
+            self._last_chicken = chicken_cum
+            return max(0, empty_cum - self._discarded)
 
 
 class ShipmentTracker:
